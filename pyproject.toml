@@ -29,6 +29,12 @@ classifiers = [
 dynamic = ["version"]
 dependencies = [
   "bioio-base>=0.2.0",
+  "dask[array]>=2021.4.1",
+  "fsspec>=2022.8.0",
+  "imagecodecs>=2020.5.30",
+  "numpy>=1.21",
+  "tifffile>=2021.8.30",
+  "xarray>=0.16.1",
 ]
 
 [project.urls]
@@ -107,4 +113,8 @@ ignore = "E203,E402,W291,W503"
 min-python-version = "3.10.0"
 per-file-ignores = [
   "__init__.py:F401",
+]
+[tool.pytest.ini_options]
+markers = [
+  "integration: requires the reference ImageXpress acquisitions on the Allen mount",
 ]
