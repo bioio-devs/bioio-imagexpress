@@ -12,7 +12,7 @@ embedded pyramid, and the sidecar junk -- at 32x32 pixels.
 
 import json
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pytest
@@ -62,6 +62,14 @@ CREATION_TIME = "10:31:10"
 # exactly these. (column, row) of each site, and the 10% overlap it uses.
 SITE_GRID = {0: (0, 0), 1: (0, 1), 2: (1, 1), 3: (1, 0)}
 TILE_OVERLAP = 0.1
+
+# What the tiles really overlap by, for the fixtures that carve them out of one
+# picture instead of filling them with a flat value. Deliberately not the 10%
+# the stage coordinates and the descriptor's pixel size between them imply: on
+# the real acquisitions those two disagree with the pixels by a few percent of a
+# tile, and a fixture that agreed with them could not tell a reader that
+# registers its tiles apart from one that trusts the metadata.
+TRUE_TILE_STEP = 24
 
 # Stage coordinates of the top-left tile. Arbitrary, but far from the origin so a
 # test cannot pass by treating absolute stage position as a pixel offset.
@@ -138,9 +146,40 @@ def plane_value(well: str, site: int, t: int, channel: int, z: int) -> int:
     return packed + 1
 
 
-def write_plane(path: Path, value: int, size: int = PLANE_SIZE) -> None:
+def specimen(plane_size: int = PLANE_SIZE, step: int = TRUE_TILE_STEP) -> np.ndarray:
+    """
+    One textured picture, large enough for a 2x2 grid of tiles to be cut from it.
+
+    Flat tiles cannot be registered -- there is nothing in them to match -- so
+    the fixtures that exercise stitching cut their tiles out of this instead, at
+    a known offset. Fixed seed: a test that asserts a pixel offset has to get the
+    same picture every run.
+    """
+    span = plane_size + step
+    return np.random.default_rng(20260814).integers(
+        100, 4000, size=(span, span), dtype=np.uint16
+    )
+
+
+def tile_of_specimen(
+    site: int, plane_size: int = PLANE_SIZE, step: int = TRUE_TILE_STEP
+) -> np.ndarray:
+    """The part of `specimen` that one acquisition position sees."""
+    column, row = SITE_GRID[site]
+    top, left = row * step, column * step
+
+    return specimen(plane_size, step)[top : top + plane_size, left : left + plane_size]
+
+
+def write_plane(
+    path: Path,
+    value: int,
+    size: int = PLANE_SIZE,
+    data: Optional[np.ndarray] = None,
+) -> None:
     """Write one plane as a MetaSeries-style pyramidal TIFF."""
-    data = np.full((size, size), value, dtype=np.uint16)
+    if data is None:
+        data = np.full((size, size), value, dtype=np.uint16)
 
     description = (
         "<MetaData>\n"
@@ -249,12 +288,20 @@ def make_acquisition_unit(
     write_sidecars: bool = True,
     skip_planes: Sequence[Tuple[str, int, int, int, int]] = (),
     plane_size: int = PLANE_SIZE,
+    tile_step: Optional[int] = None,
+    blank_sites: Sequence[int] = (),
 ) -> Path:
     """
     Write one acquisition unit and return its path.
 
     ``skip_planes`` omits ``(well, site, t, channel, z)`` planes so ragged
     acquisitions can be exercised.
+
+    ``tile_step`` cuts every plane out of `specimen` at that pixel offset rather
+    than filling it with `plane_value`, which is what makes a fixture's tiles
+    registrable -- and lets them overlap by something other than what the stage
+    coordinates claim. ``blank_sites`` then flattens the named positions again,
+    for the empty corner of a well that has nothing to register on.
     """
     root.mkdir(parents=True, exist_ok=True)
     skip = set(skip_planes)
@@ -294,6 +341,11 @@ def make_acquisition_unit(
                             timepoint_dir / name,
                             plane_value(well, site, t, channel, z),
                             size=plane_size,
+                            data=(
+                                tile_of_specimen(site, plane_size, tile_step)
+                                if tile_step is not None and site not in blank_sites
+                                else None
+                            ),
                         )
 
                         if write_sidecars:
@@ -358,6 +410,26 @@ def mosaic_unit(tmp_path: Path) -> Path:
         channels=["TL"],
         t_count=1,
         z_count=1,
+    )
+
+
+@pytest.fixture
+def registrable_unit(tmp_path: Path) -> Path:
+    """
+    A 2x2 well whose tiles really do overlap, and not by what the metadata says.
+
+    The stage coordinates and the descriptor's pixel size put the tiles 29 px
+    apart; the pixels put them 24 px apart. That is the disagreement the real
+    acquisitions have, in miniature.
+    """
+    return make_acquisition_unit(
+        tmp_path / "registrable",
+        wells=["B02"],
+        sites=[0, 1, 2, 3],
+        channels=["TL"],
+        t_count=1,
+        z_count=1,
+        tile_step=TRUE_TILE_STEP,
     )
 
 

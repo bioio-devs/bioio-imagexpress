@@ -24,7 +24,7 @@ from bioio_base.types import DimSpec, PhysicalPixelSizes, TimeInterval
 from dask import delayed
 from fsspec.spec import AbstractFileSystem
 
-from . import index, parsers
+from . import index, parsers, stitching
 from .index import AcquisitionUnit, PlaneKey, SceneKey
 
 ###############################################################################
@@ -61,6 +61,13 @@ class Reader(BaseReader):
         ``mosaic_xarray_data``. Turn it off to get one scene per (well, site) and no
         ``M`` dimension, which is what you want when the tiles are the unit of
         analysis rather than the well.
+        Default: True
+    register_tiles: bool
+        Correct the stage-derived tile placement by registering the tiles against
+        each other, which costs one plane read per tile of the scene the first
+        time it is placed. Without it the descriptor's pixel size is taken at
+        face value and seams land a few percent of a tile out; see
+        ``stitching``. Turn it off to place tiles from metadata alone.
         Default: True
 
     Notes
@@ -105,10 +112,14 @@ class Reader(BaseReader):
     Units within one run root routinely differ in shape, channel count and pixel
     size, so shape and metadata are always resolved against the current scene.
 
-    Stitching places tiles from their manifest stage positions, last tile winning
-    in the overlap. MetaXpress refines its own montage by image registration, so
-    ``experiment_montage`` is not reproduced pixel for pixel -- prefer that unit
-    where it exists, and this where it does not.
+    Stitching starts from the manifest's stage positions and then registers the
+    tiles against each other to correct them, because the descriptor's pixel size
+    -- the only micron-to-pixel scale an acquisition carries -- disagrees with the
+    real image scale by a few percent, which is a couple of hundred pixels of a
+    2304 px tile. See ``stitching`` for the measurements. Overlap is resolved
+    last tile winning rather than blended, so ``experiment_montage`` is still not
+    reproduced pixel for pixel -- prefer that unit where it exists, and this where
+    it does not.
     """
 
     _xarray_dask_data: Optional["xr.DataArray"] = None
@@ -132,6 +143,7 @@ class Reader(BaseReader):
         fs_kwargs: Dict[str, Any] = {},
         verify_planes: bool = False,
         mosaic: bool = True,
+        register_tiles: bool = True,
         **kwargs: Any,
     ):
         self._fs, self._path = io.pathlike_to_fs(
@@ -188,6 +200,12 @@ class Reader(BaseReader):
         # a scene switch can never serve another scene's shape.
         self._plane_specs: Dict[int, Tuple[Tuple[int, int], np.dtype]] = {}
         self._level_shapes: Dict[int, List[Tuple[int, ...]]] = {}
+
+        # Registering tiles costs a plane read each, so a layout is kept once it
+        # has been worked out. Keyed by resolution level as well as scene, since
+        # positions are pixel offsets and a level change moves all of them.
+        self._register_tiles = register_tiles
+        self._tile_layouts: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}
 
     @staticmethod
     def _is_supported_image(fs: "AbstractFileSystem", path: str, **kwargs: Any) -> bool:
@@ -801,6 +819,63 @@ class Reader(BaseReader):
     def _tile_positions(self) -> List[Tuple[int, int]]:
         """
         Tile origins in pixels at the current resolution level.
+
+        The stage placement is only a starting guess: the descriptor's pixel size
+        is the one thing available to convert microns to pixels and it is a few
+        percent off, so the tiles are registered against each other to correct it
+        unless ``register_tiles=False``. Cached, since that costs a plane read
+        per tile.
+        """
+        stage = self._stage_tile_positions()
+        if not self._register_tiles or len(stage) < 2:
+            return stage
+
+        level = min(
+            self._current_resolution_level, len(self._current_level_shapes()) - 1
+        )
+        key = (self._current_scene_index, level)
+        if key not in self._tile_layouts:
+            self._tile_layouts[key] = stitching.refine_tile_positions(
+                stage, self._registration_planes()
+            )
+
+        return self._tile_layouts[key]
+
+    def _registration_planes(self) -> List[Optional[np.ndarray]]:
+        """
+        One plane per tile of the current scene, to register the tiles on.
+
+        The middle time point and Z slice, so that a focal series is judged on
+        the slice most likely to be in focus rather than on an end of the sweep,
+        and the first channel, which on both reference acquisitions is the
+        transmitted-light one and so is textured everywhere there is sample.
+        """
+        unit, well, sites = self._current()
+        timepoints, channels, zs = unit.extents(self._current_keys())
+        plane_shape, dtype = self._plane_spec()
+        level = min(
+            self._current_resolution_level, len(self._current_level_shapes()) - 1
+        )
+        key = (
+            timepoints[len(timepoints) // 2],
+            channels[0],
+            zs[len(zs) // 2],
+        )
+
+        return [
+            _read_plane(
+                self._fs,
+                unit.planes.get((well, site), {}).get(key),
+                plane_shape,
+                dtype,
+                level,
+            )
+            for site in sites
+        ]
+
+    def _stage_tile_positions(self) -> List[Tuple[int, int]]:
+        """
+        Where the manifest's stage coordinates put each tile, in pixels.
 
         A single-tile well needs no metadata -- it is its own origin -- which
         keeps `experiment_montage` (already stitched, one tile per well) and

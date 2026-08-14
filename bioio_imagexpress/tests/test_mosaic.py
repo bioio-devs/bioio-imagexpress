@@ -21,7 +21,14 @@ from bioio_base import exceptions
 
 from bioio_imagexpress import Reader
 
-from .conftest import PLANE_SIZE, make_acquisition_unit, plane_value, tile_pixel_offset
+from .conftest import (
+    PLANE_SIZE,
+    TRUE_TILE_STEP,
+    make_acquisition_unit,
+    plane_value,
+    specimen,
+    tile_pixel_offset,
+)
 
 ###############################################################################
 
@@ -117,6 +124,9 @@ def test_tile_positions_form_the_acquisition_grid(mosaic_unit: Path) -> None:
     The manifest carries absolute stage coordinates far from the origin, so the
     reader has to difference them against the top-left tile and divide by pixel
     size. At 32 px and 10% overlap that grid is one step of 29 px on each axis.
+
+    This fixture's planes are flat, so nothing in them can be registered and the
+    stage placement is what comes back -- which is the point here.
     """
     reader = Reader(mosaic_unit)
 
@@ -228,6 +238,140 @@ def test_a_single_site_well_is_its_own_mosaic(tmp_path: Path) -> None:
     assert reader.get_mosaic_tile_positions() == [(0, 0)]
     assert reader.mosaic_xarray_data.shape == (1, 1, 1, 32, 32)
     assert np.array_equal(reader.mosaic_data, reader.data[0])
+
+
+###############################################################################
+# Registration
+#
+# Stage coordinates alone place a tile to within a few percent of a tile, because
+# the descriptor's pixel size -- the only micron-to-pixel scale an acquisition
+# carries -- does not match the real image scale. On the reference acquisitions
+# that is 212 px of a 2304 px tile on one unit and 41 px on another, in opposite
+# directions. The `registrable_unit` fixture reproduces the disagreement: its
+# metadata says the tiles step by 29 px, its pixels say 24.
+
+
+def test_registration_corrects_the_metadata_placement(registrable_unit: Path) -> None:
+    """The reason any of this is here: the pixels win over the descriptor."""
+    reader = Reader(registrable_unit)
+
+    assert reader.get_mosaic_tile_positions() == [
+        (0, 0),
+        (TRUE_TILE_STEP, 0),
+        (TRUE_TILE_STEP, TRUE_TILE_STEP),
+        (0, TRUE_TILE_STEP),
+    ]
+
+
+def test_registration_can_be_turned_off(registrable_unit: Path) -> None:
+    """
+    ``register_tiles=False`` is the escape hatch for anyone who would rather have
+    the metadata's answer than pay a plane read per tile -- so it has to still be
+    the metadata's answer, wrong though it is.
+    """
+    reader = Reader(registrable_unit, register_tiles=False)
+
+    assert reader.get_mosaic_tile_positions() == [(0, 0), (29, 0), (29, 29), (0, 29)]
+
+
+def test_the_registered_stitch_reassembles_the_specimen(
+    registrable_unit: Path,
+) -> None:
+    """
+    The fixture cut its four tiles out of one picture, so a correctly placed
+    stitch is that picture again -- every pixel of it, not merely a plausible
+    shape. Placed by metadata the tiles would sit 5 px too far apart and this
+    could not hold anywhere past the first seam.
+    """
+    reader = Reader(registrable_unit)
+
+    stitched = reader.mosaic_xarray_data
+
+    span = PLANE_SIZE + TRUE_TILE_STEP
+
+    assert stitched.shape == (1, 1, 1, span, span)
+    assert np.array_equal(stitched.data[0, 0, 0], specimen())
+
+
+def test_a_tile_with_nothing_in_it_still_lands_on_the_grid(tmp_path: Path) -> None:
+    """
+    A well's corner is routinely empty, and an empty tile cannot be registered
+    against anything. It has to follow the correction its neighbours measured
+    rather than fall back to the placement they just disproved.
+    """
+    unit = make_acquisition_unit(
+        tmp_path / "one_blank",
+        wells=["B02"],
+        sites=[0, 1, 2, 3],
+        channels=["TL"],
+        t_count=1,
+        z_count=1,
+        tile_step=TRUE_TILE_STEP,
+        blank_sites=[3],
+    )
+
+    reader = Reader(unit)
+
+    assert reader.get_mosaic_tile_positions()[3] == (0, TRUE_TILE_STEP)
+
+
+def test_registration_is_redone_for_each_scene(tmp_path: Path) -> None:
+    """
+    A registered layout is cached, since working it out costs a plane read per
+    tile -- so it is the sort of thing that gets served to the wrong scene. This
+    run root mixes a registrable well with an already-stitched one, whose layout
+    is nothing like it.
+    """
+    root = tmp_path / "run"
+    make_acquisition_unit(
+        root / "experiment",
+        wells=["B02", "B03"],
+        sites=[0, 1, 2, 3],
+        channels=["TL"],
+        t_count=1,
+        z_count=1,
+        tile_step=TRUE_TILE_STEP,
+    )
+    make_acquisition_unit(
+        root / "experiment_montage",
+        wells=["B02", "B03"],
+        sites=[0],
+        channels=["TL"],
+        t_count=1,
+        z_count=1,
+        pixel_size=1.6595,
+        plane_size=16,
+    )
+    reader = Reader(root)
+
+    def layout(scene_id: str) -> list:
+        reader.set_scene(scene_id)
+        return reader.get_mosaic_tile_positions()
+
+    registered = [(0, 0), (24, 0), (24, 24), (0, 24)]
+
+    assert layout("experiment/B02") == registered
+    assert layout("experiment_montage/B02") == [(0, 0)]
+    # And in the other order, to catch state that only leaks one way.
+    assert layout("experiment/B03") == registered
+    assert layout("experiment_montage/B03") == [(0, 0)]
+
+
+def test_registration_is_redone_for_each_resolution_level(
+    registrable_unit: Path,
+) -> None:
+    """
+    Positions are pixel offsets at the current level, and the tiles registered to
+    find them are read at that level too, so the answer for one level is never
+    the answer for another.
+    """
+    reader = Reader(registrable_unit)
+
+    assert reader.get_mosaic_tile_positions() == [(0, 0), (24, 0), (24, 24), (0, 24)]
+
+    reader.set_resolution_level(1)
+
+    assert reader.get_mosaic_tile_positions() == [(0, 0), (12, 0), (12, 12), (0, 12)]
 
 
 ###############################################################################

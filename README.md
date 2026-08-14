@@ -92,7 +92,7 @@ They therefore land on the `M` dimension, and a scene is a whole well:
 r = Reader(".../experiment/Acquisition.jdce")
 r.scenes                       # ('B02', 'B03', ...) -- one per well
 r.dims                         # <Dimensions [M: 4, T: 1, C: 1, Z: 1, Y: 2304, X: 2304]>
-r.get_mosaic_tile_positions()  # [(0, 0), (2074, 0), (2074, 2074), (0, 2074)]
+r.get_mosaic_tile_positions()  # [(0, 0), (2114, 1), (2114, 2116), (0, 2114)]
 r.mosaic_xarray_data           # TCZYX, YX expanded to the stitched well
 ```
 
@@ -104,11 +104,28 @@ r.scenes                       # ('B02-s0', 'B02-s1', ...) -- one per well and t
 r.dims                         # <Dimensions [T: 1, C: 1, Z: 1, Y: 2304, X: 2304]>
 ```
 
-Stitching places tiles from their manifest stage positions, with the later tile
-winning in the overlap rather than blending. MetaXpress refines its own montage by
-image registration — observed tile spacing differs from the stage-derived spacing by
-a few percent — so `experiment_montage` is not reproduced pixel for pixel. Prefer
-that unit where the acquisition has one; note that `experiment_z_stack` does not.
+Stitching starts from the manifest's stage positions and then **registers the tiles
+against each other** to correct them. It has to: converting stage microns into pixels
+needs a micron-per-pixel scale, the descriptor's `ObjectiveCalibration` is the only
+one an acquisition carries, and it does not match the real image scale —
+
+| unit | objective | descriptor | stage step | measured step |
+|---|---|---|---|---|
+| `experiment` | 4X | 1.6595 µm/px | 2073.6 px | 2115 px (+2.0%) |
+| `experiment_z_stack` | 10X | 0.5817 µm/px | 2073.6 px | 1862 px (−10.2%) |
+
+— so tiles placed from metadata alone land up to 212 px out on a 2304 px tile, which
+is a plainly visible tear at every seam. The error differs in size *and in sign*
+between two units acquired on the same instrument, so no constant repairs it.
+Registered, the 4X well stitches to 4418×4420 against MetaXpress's own
+`experiment_montage` of the same well at 4417×4418.
+
+This costs one plane read per tile, cached per scene and resolution level. Pass
+`Reader(path, register_tiles=False)` to place from metadata alone instead.
+
+The overlap is still resolved later-tile-wins rather than blended, so
+`experiment_montage` is not reproduced pixel for pixel. Prefer that unit where the
+acquisition has one; note that `experiment_z_stack` does not.
 
 Indexing is manifest-driven and costs **two file reads, no directory listings**: the
 `.jdce` descriptor names its `image_metadata_*.csv` manifests, and those name every
