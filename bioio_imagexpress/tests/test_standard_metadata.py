@@ -28,7 +28,7 @@ TILE_0_X, TILE_0_Y = tile_stage_position(0, PLANE_SIZE, PIXEL_SIZE)
 TILE_1_X, TILE_1_Y = tile_stage_position(1, PLANE_SIZE, PIXEL_SIZE)
 
 
-def test_every_field_the_format_can_supply_is_populated(acquisition_unit: Path):
+def test_every_field_the_format_can_supply_is_populated(acquisition_unit: Path) -> None:
     """
     ImageXpress carries all but one standard field. Asserting on the whole set
     catches a field silently dropping to None as the parsers change.
@@ -70,7 +70,7 @@ def test_every_field_the_format_can_supply_is_populated(acquisition_unit: Path):
 
 def test_every_field_the_format_can_supply_is_populated_per_tile(
     acquisition_unit: Path,
-):
+) -> None:
     """
     The same whole-set assertion with mosaic off, where a scene is one
     acquisition position: no tile axis, and the tile's own index and stage
@@ -122,7 +122,7 @@ def _scene_snapshot(reader: Reader, scene_id: str):
     )
 
 
-def test_fields_follow_the_current_scene(run_root: Path):
+def test_fields_follow_the_current_scene(run_root: Path) -> None:
     """
     A run root mixes units, so nothing here may survive a scene change.
 
@@ -141,7 +141,7 @@ def test_fields_follow_the_current_scene(run_root: Path):
     assert _scene_snapshot(reader, "experiment/B03") == experiment
 
 
-def test_fields_follow_the_current_scene_per_tile(run_root: Path):
+def test_fields_follow_the_current_scene_per_tile(run_root: Path) -> None:
     """
     The same crossing of units with mosaic off, where each scene is one tile and
     ``position_index`` has to move with it too.
@@ -157,7 +157,7 @@ def test_fields_follow_the_current_scene_per_tile(run_root: Path):
     assert _scene_snapshot(reader, "experiment/B03-s1") == experiment
 
 
-def test_to_dict_uses_the_readable_labels(acquisition_unit: Path):
+def test_to_dict_uses_the_readable_labels(acquisition_unit: Path) -> None:
     reader = Reader(acquisition_unit)
 
     as_dict = reader.standard_metadata.to_dict()
@@ -172,7 +172,7 @@ def test_to_dict_uses_the_readable_labels(acquisition_unit: Path):
 # reader.metadata stays format-native
 
 
-def test_metadata_is_the_formats_own_and_nothing_else(acquisition_unit: Path):
+def test_metadata_is_the_formats_own_and_nothing_else(acquisition_unit: Path) -> None:
     """
     The normalized field set lives on `standard_metadata`; `metadata` must not
     duplicate it.
@@ -189,7 +189,7 @@ def test_metadata_is_the_formats_own_and_nothing_else(acquisition_unit: Path):
     assert metadata["indexed_from"] == "image_metadata_csv"
 
 
-def test_metadata_does_not_mutate_the_array_attrs(acquisition_unit: Path):
+def test_metadata_does_not_mutate_the_array_attrs(acquisition_unit: Path) -> None:
     """`metadata` composes a new dict; the xarray attrs are left alone."""
     reader = Reader(acquisition_unit)
 
@@ -202,7 +202,7 @@ def test_metadata_does_not_mutate_the_array_attrs(acquisition_unit: Path):
 # The manifest, as JSON-able Python
 
 
-def test_metadata_carries_the_manifest_rows_for_this_scene(acquisition_unit: Path):
+def test_metadata_carries_the_manifest_rows_for_this_scene(acquisition_unit: Path) -> None:
     """
     The CSV manifest becomes one dict per row with every column kept -- the
     per-plane record the reduced index rows throw away.
@@ -230,7 +230,7 @@ def test_metadata_carries_the_manifest_rows_for_this_scene(acquisition_unit: Pat
     assert records[0]["PositionZUm"] is not None
 
 
-def test_metadata_carries_the_manifest_rows_for_one_tile(acquisition_unit: Path):
+def test_metadata_carries_the_manifest_rows_for_one_tile(acquisition_unit: Path) -> None:
     """
     With mosaic off a scene is one acquisition position, so the rows must be
     narrowed to that tile rather than to its well.
@@ -255,7 +255,7 @@ def test_metadata_carries_the_manifest_rows_for_one_tile(acquisition_unit: Path)
     assert records[0]["PositionZUm"] is not None
 
 
-def test_manifest_rows_keep_every_value_as_written(acquisition_unit: Path):
+def test_manifest_rows_keep_every_value_as_written(acquisition_unit: Path) -> None:
     """
     Cells stay strings: coercing would not round-trip a checksum or a zero-padded
     id. Empty cells become None.
@@ -268,7 +268,7 @@ def test_manifest_rows_keep_every_value_as_written(acquisition_unit: Path):
     assert row["Row"] == "2"
 
 
-def test_metadata_is_json_serializable(acquisition_unit: Path):
+def test_metadata_is_json_serializable(acquisition_unit: Path) -> None:
     """
     The point of the conversion: both source files land as JSON-able Python.
     """
@@ -282,7 +282,7 @@ def test_metadata_is_json_serializable(acquisition_unit: Path):
     assert metadata["jdce"]["ImageStack"]["PlateId"] == "3500000000"
 
 
-def test_manifest_rows_follow_the_current_scene(run_root: Path):
+def test_manifest_rows_follow_the_current_scene(run_root: Path) -> None:
     reader = Reader(run_root)
 
     reader.set_scene("experiment/B02")
@@ -294,7 +294,7 @@ def test_manifest_rows_follow_the_current_scene(run_root: Path):
     assert len(records) == 1  # this unit is 1 site x 1 t x 1 c x 1 z
 
 
-def test_manifest_rows_are_empty_without_a_manifest(tmp_path: Path):
+def test_manifest_rows_are_empty_without_a_manifest(tmp_path: Path) -> None:
     """A filename-indexed unit has no manifest to expose."""
     reader = Reader(make_acquisition_unit(tmp_path / "without", write_csv=False))
 
@@ -307,14 +307,14 @@ def test_manifest_rows_are_empty_without_a_manifest(tmp_path: Path):
 # Timing
 
 
-def test_durations_come_from_the_manifest(acquisition_unit: Path):
+def test_durations_come_from_the_manifest(acquisition_unit: Path) -> None:
     reader = Reader(acquisition_unit)
 
     assert reader.total_time_duration == timedelta(seconds=TIME_INTERVAL_S)
     assert reader.time_interval == timedelta(seconds=TIME_INTERVAL_S)
 
 
-def test_durations_are_none_for_a_single_time_point(tmp_path: Path):
+def test_durations_are_none_for_a_single_time_point(tmp_path: Path) -> None:
     reader = Reader(make_acquisition_unit(tmp_path / "single", t_count=1))
 
     assert reader.total_time_duration is None
@@ -322,7 +322,7 @@ def test_durations_are_none_for_a_single_time_point(tmp_path: Path):
     assert reader.standard_metadata.timelapse is False
 
 
-def test_durations_are_none_without_a_manifest(tmp_path: Path):
+def test_durations_are_none_without_a_manifest(tmp_path: Path) -> None:
     """Timestamps live only in the CSV; the filenames cannot supply them."""
     reader = Reader(make_acquisition_unit(tmp_path / "without", write_csv=False))
 
@@ -332,7 +332,7 @@ def test_durations_are_none_without_a_manifest(tmp_path: Path):
     assert reader.standard_metadata.timelapse is True
 
 
-def test_interval_averages_over_more_than_two_time_points(tmp_path: Path):
+def test_interval_averages_over_more_than_two_time_points(tmp_path: Path) -> None:
     reader = Reader(make_acquisition_unit(tmp_path / "long", t_count=4))
 
     assert reader.total_time_duration == timedelta(seconds=3 * TIME_INTERVAL_S)
@@ -343,7 +343,7 @@ def test_interval_averages_over_more_than_two_time_points(tmp_path: Path):
 # Acquisition datetime
 
 
-def test_imaging_datetime_prefers_the_descriptor(acquisition_unit: Path):
+def test_imaging_datetime_prefers_the_descriptor(acquisition_unit: Path) -> None:
     """
     The descriptor's stamp is instrument local time; the manifest's is a Unix
     epoch. They describe the same moment and must not be mixed up.
@@ -354,7 +354,7 @@ def test_imaging_datetime_prefers_the_descriptor(acquisition_unit: Path):
     assert reader.imaging_datetime.tzinfo is None
 
 
-def test_imaging_datetime_falls_back_to_the_manifest(tmp_path: Path):
+def test_imaging_datetime_falls_back_to_the_manifest(tmp_path: Path) -> None:
     unit = make_acquisition_unit(tmp_path / "no_creation")
     descriptor = next(unit.glob("*.jdce"))
     descriptor.write_text(descriptor.read_text().replace('"Creation"', '"_Creation"'))
@@ -365,7 +365,7 @@ def test_imaging_datetime_falls_back_to_the_manifest(tmp_path: Path):
     assert reader.imaging_datetime == datetime.fromtimestamp(EPOCH, tz=timezone.utc)
 
 
-def test_imaging_datetime_is_none_without_either_source(tmp_path: Path):
+def test_imaging_datetime_is_none_without_either_source(tmp_path: Path) -> None:
     unit = make_acquisition_unit(tmp_path / "bare", write_csv=False)
     descriptor = next(unit.glob("*.jdce"))
     descriptor.write_text(descriptor.read_text().replace('"Creation"', '"_Creation"'))

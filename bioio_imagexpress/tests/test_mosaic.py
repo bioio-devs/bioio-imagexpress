@@ -21,12 +21,7 @@ from bioio_base import exceptions
 
 from bioio_imagexpress import Reader
 
-from .conftest import (
-    PLANE_SIZE,
-    make_acquisition_unit,
-    plane_value,
-    tile_pixel_offset,
-)
+from .conftest import PLANE_SIZE, make_acquisition_unit, plane_value, tile_pixel_offset
 
 ###############################################################################
 
@@ -42,21 +37,21 @@ TILE_CENTRE = PLANE_SIZE // 2
 # Scenes
 
 
-def test_scenes_are_wells(mosaic_unit: Path):
+def test_scenes_are_wells(mosaic_unit: Path) -> None:
     """The whole point of the default: four acquisition positions, one scene."""
     reader = Reader(mosaic_unit)
 
     assert reader.scenes == ("B02",)
 
 
-def test_scenes_are_wells_and_sites_without_mosaic(mosaic_unit: Path):
+def test_scenes_are_wells_and_sites_without_mosaic(mosaic_unit: Path) -> None:
     """With mosaic off each acquisition position is addressable on its own."""
     reader = Reader(mosaic_unit, mosaic=False)
 
     assert reader.scenes == ("B02-s0", "B02-s1", "B02-s2", "B02-s3")
 
 
-def test_both_readings_cover_the_same_planes(acquisition_unit: Path):
+def test_both_readings_cover_the_same_planes(acquisition_unit: Path) -> None:
     """
     Mosaic only regroups the planes, it does not choose different ones: tile M of
     the well scene has to be byte-identical to the scene that tile reads as with
@@ -79,7 +74,7 @@ def test_both_readings_cover_the_same_planes(acquisition_unit: Path):
 # Dimensions
 
 
-def test_tiles_stack_on_the_mosaic_dimension(mosaic_unit: Path):
+def test_tiles_stack_on_the_mosaic_dimension(mosaic_unit: Path) -> None:
     """M is the first axis and carries one entry per acquisition position."""
     reader = Reader(mosaic_unit)
 
@@ -88,7 +83,7 @@ def test_tiles_stack_on_the_mosaic_dimension(mosaic_unit: Path):
     assert reader.dims.M == len(MOSAIC_SITES)
 
 
-def test_there_is_no_mosaic_dimension_without_mosaic(mosaic_unit: Path):
+def test_there_is_no_mosaic_dimension_without_mosaic(mosaic_unit: Path) -> None:
     """A scene is a single tile with mosaic off, so M would have nothing to hold."""
     reader = Reader(mosaic_unit, mosaic=False)
 
@@ -96,7 +91,7 @@ def test_there_is_no_mosaic_dimension_without_mosaic(mosaic_unit: Path):
     assert reader.dims.shape == (1, 1, 1, 32, 32)
 
 
-def test_mosaic_tile_dims_report_one_tile(mosaic_unit: Path):
+def test_mosaic_tile_dims_report_one_tile(mosaic_unit: Path) -> None:
     """The stitched well is larger than a tile, so YX here must stay the tile's."""
     reader = Reader(mosaic_unit)
 
@@ -106,7 +101,7 @@ def test_mosaic_tile_dims_report_one_tile(mosaic_unit: Path):
     assert tile_dims.shape == (32, 32)
 
 
-def test_mosaic_tile_dims_are_absent_without_mosaic(mosaic_unit: Path):
+def test_mosaic_tile_dims_are_absent_without_mosaic(mosaic_unit: Path) -> None:
     """bioio-base reports None rather than raising when there are no tiles."""
     reader = Reader(mosaic_unit, mosaic=False)
 
@@ -117,7 +112,7 @@ def test_mosaic_tile_dims_are_absent_without_mosaic(mosaic_unit: Path):
 # Tile positions
 
 
-def test_tile_positions_form_the_acquisition_grid(mosaic_unit: Path):
+def test_tile_positions_form_the_acquisition_grid(mosaic_unit: Path) -> None:
     """
     The manifest carries absolute stage coordinates far from the origin, so the
     reader has to difference them against the top-left tile and divide by pixel
@@ -132,7 +127,7 @@ def test_tile_positions_form_the_acquisition_grid(mosaic_unit: Path):
     assert positions == [tile_pixel_offset(site, PLANE_SIZE) for site in MOSAIC_SITES]
 
 
-def test_a_single_tile_position_indexes_the_full_list(mosaic_unit: Path):
+def test_a_single_tile_position_indexes_the_full_list(mosaic_unit: Path) -> None:
     """The singular accessor must agree with the list for every tile, not just M=0."""
     reader = Reader(mosaic_unit)
 
@@ -141,7 +136,7 @@ def test_a_single_tile_position_indexes_the_full_list(mosaic_unit: Path):
     assert [reader.get_mosaic_tile_position(i) for i in range(4)] == positions
 
 
-def test_tile_positions_require_a_tile_dimension(mosaic_unit: Path):
+def test_tile_positions_require_a_tile_dimension(mosaic_unit: Path) -> None:
     """With mosaic off the scene is one tile, so there is no grid to describe."""
     reader = Reader(mosaic_unit, mosaic=False)
 
@@ -153,7 +148,7 @@ def test_tile_positions_require_a_tile_dimension(mosaic_unit: Path):
 # Stitching
 
 
-def test_the_stitched_well_spans_the_grid(mosaic_unit: Path):
+def test_the_stitched_well_spans_the_grid(mosaic_unit: Path) -> None:
     """
     Stitching drops M and grows YX to the grid's extent: the last tile starts at
     29 and is 32 px wide, so the well is 61 px on each axis rather than 64 -- the
@@ -167,7 +162,7 @@ def test_the_stitched_well_spans_the_grid(mosaic_unit: Path):
     assert stitched.shape == (1, 1, 1, 61, 61)
 
 
-def test_every_tile_lands_at_its_own_position(mosaic_unit: Path):
+def test_every_tile_lands_at_its_own_position(mosaic_unit: Path) -> None:
     """
     Shape alone would pass on a mosaic assembled in the wrong order, so each tile
     is identified by the value packed into its pixels. Probed at the tile centre:
@@ -183,7 +178,7 @@ def test_every_tile_lands_at_its_own_position(mosaic_unit: Path):
         ] == plane_value("B02", site, 0, 0, 0)
 
 
-def test_delayed_and_immediate_mosaics_agree(mosaic_unit: Path):
+def test_delayed_and_immediate_mosaics_agree(mosaic_unit: Path) -> None:
     """Stitching is done twice, once per backend, so the two can drift apart."""
     reader = Reader(mosaic_unit)
 
@@ -193,7 +188,7 @@ def test_delayed_and_immediate_mosaics_agree(mosaic_unit: Path):
     )
 
 
-def test_stitching_requires_a_tile_dimension(mosaic_unit: Path):
+def test_stitching_requires_a_tile_dimension(mosaic_unit: Path) -> None:
     """
     Both stitched surfaces refuse a tile-less scene. bioio-base guards these two
     itself, and raises its own InvalidDimensionOrderingError rather than the
@@ -212,7 +207,7 @@ def test_stitching_requires_a_tile_dimension(mosaic_unit: Path):
 # Already-stitched wells
 
 
-def test_a_single_site_well_is_its_own_mosaic(tmp_path: Path):
+def test_a_single_site_well_is_its_own_mosaic(tmp_path: Path) -> None:
     """
     ``experiment_montage`` is MetaXpress's own stitch and images one position per
     well. It needs no stage metadata to place: a lone tile is the origin, and the
@@ -239,7 +234,7 @@ def test_a_single_site_well_is_its_own_mosaic(tmp_path: Path):
 # Resolution levels
 
 
-def test_tile_placement_scales_with_resolution_level(mosaic_unit: Path):
+def test_tile_placement_scales_with_resolution_level(mosaic_unit: Path) -> None:
     """
     Positions are pixel offsets, so they only stay right if they are recomputed
     against the level's pixel size: at level 1 both the step and the stitched well
@@ -265,7 +260,7 @@ def test_tile_placement_scales_with_resolution_level(mosaic_unit: Path):
 # Acquisitions without stage positions
 
 
-def test_a_mosaic_without_stage_positions_says_how_to_read_it(tmp_path: Path):
+def test_a_mosaic_without_stage_positions_says_how_to_read_it(tmp_path: Path) -> None:
     """
     Filename-only indexing loses the stage coordinates, and nothing else in the
     acquisition says where a site sat, so a multi-tile well cannot be placed. The
@@ -289,7 +284,7 @@ def test_a_mosaic_without_stage_positions_says_how_to_read_it(tmp_path: Path):
     assert "mosaic=False" in str(error.value)
 
 
-def test_tiles_still_read_without_stage_positions(tmp_path: Path):
+def test_tiles_still_read_without_stage_positions(tmp_path: Path) -> None:
     """
     Only the placement is lost. The tiles themselves are indexed from filenames,
     so M still carries them in site order and the pixels still come back.
@@ -318,7 +313,7 @@ def test_tiles_still_read_without_stage_positions(tmp_path: Path):
 # Scene changes
 
 
-def test_a_scene_change_re_resolves_tile_positions(run_root: Path):
+def test_a_scene_change_re_resolves_tile_positions(run_root: Path) -> None:
     """
     A run root mixes a two-tile unit with an already-stitched one at a different
     pixel size, so a tile layout cached across a scene change would place the

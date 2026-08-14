@@ -80,7 +80,7 @@ def _require(path: Path) -> Path:
 
 
 @pytest.mark.integration
-def test_z_stack_acquisition():
+def test_z_stack_acquisition() -> None:
     reader = Reader(_require(Z_STACK))
 
     # 30 wells, each a 2x2 mosaic of 4 tiles, 9 time points x 2 channels x 11 z.
@@ -96,7 +96,7 @@ def test_z_stack_acquisition():
 
 
 @pytest.mark.integration
-def test_z_stack_time_coords_are_six_hourly():
+def test_z_stack_time_coords_are_six_hourly() -> None:
     reader = Reader(_require(Z_STACK))
 
     coords = reader.xarray_dask_data.coords["T"].values
@@ -107,7 +107,7 @@ def test_z_stack_time_coords_are_six_hourly():
 
 
 @pytest.mark.integration
-def test_z_stack_plane_matches_the_source_tiff():
+def test_z_stack_plane_matches_the_source_tiff() -> None:
     tifffile = pytest.importorskip("tifffile")
     root = _require(Z_STACK)
 
@@ -121,7 +121,7 @@ def test_z_stack_plane_matches_the_source_tiff():
 
 
 @pytest.mark.integration
-def test_run_root_exposes_both_units():
+def test_run_root_exposes_both_units() -> None:
     reader = Reader(_require(RUN_ROOT))
 
     # 60 wells of `experiment`, plus the same 60 wells already stitched.
@@ -136,7 +136,7 @@ def test_run_root_exposes_both_units():
 
 
 @pytest.mark.integration
-def test_run_root_units_keep_distinct_shapes():
+def test_run_root_units_keep_distinct_shapes() -> None:
     reader = Reader(_require(RUN_ROOT))
 
     reader.set_scene("experiment/B02")
@@ -151,7 +151,7 @@ def test_run_root_units_keep_distinct_shapes():
 
 
 @pytest.mark.integration
-def test_z_stack_standard_metadata():
+def test_z_stack_standard_metadata() -> None:
     reader = Reader(_require(Z_STACK))
 
     metadata = reader.standard_metadata
@@ -177,7 +177,7 @@ def test_z_stack_standard_metadata():
 
 
 @pytest.mark.integration
-def test_z_stack_region_read_opens_only_the_named_planes():
+def test_z_stack_region_read_opens_only_the_named_planes() -> None:
     """
     The whole point of `_read_indexed`: one plane of a 198 plane scene must cost
     one file open, not 198. Without the seam this read takes ~7 minutes.
@@ -212,7 +212,7 @@ def test_z_stack_region_read_opens_only_the_named_planes():
 
 
 @pytest.mark.integration
-def test_z_stack_region_read_matches_the_source_tiffs():
+def test_z_stack_region_read_matches_the_source_tiffs() -> None:
     """A multi-plane selection must land each file at the right coordinate."""
     tifffile = pytest.importorskip("tifffile")
     root = _require(Z_STACK)
@@ -236,7 +236,7 @@ def test_z_stack_region_read_matches_the_source_tiffs():
 
 
 @pytest.mark.integration
-def test_z_stack_over_https_indexes_without_listing():
+def test_z_stack_over_https_indexes_without_listing() -> None:
     """
     The endpoint serves files but returns 403 for directory listings, so this only
     works because indexing is manifest-driven. Naming the descriptor is the way
@@ -255,7 +255,7 @@ def test_z_stack_over_https_indexes_without_listing():
 
 
 @pytest.mark.integration
-def test_z_stack_over_https_standard_metadata_matches_the_mount():
+def test_z_stack_over_https_standard_metadata_matches_the_mount() -> None:
     """The transport must not change a single field."""
     url = _require_url(f"{Z_STACK_URL}/{Z_STACK_DESCRIPTOR}")
 
@@ -263,7 +263,7 @@ def test_z_stack_over_https_standard_metadata_matches_the_mount():
 
 
 @pytest.mark.integration
-def test_z_stack_over_https_plane_matches_the_mount():
+def test_z_stack_over_https_plane_matches_the_mount() -> None:
     tifffile = pytest.importorskip("tifffile")
     url = _require_url(f"{Z_STACK_URL}/{Z_STACK_DESCRIPTOR}")
     root = _require(Z_STACK)
@@ -277,7 +277,7 @@ def test_z_stack_over_https_plane_matches_the_mount():
 
 
 @pytest.mark.integration
-def test_z_stack_over_https_directory_form_is_rejected_clearly():
+def test_z_stack_over_https_directory_form_is_rejected_clearly() -> None:
     """
     Pointing at the directory cannot work here -- the descriptor's name is
     unknowable without a listing. The error must say what to do instead.
@@ -296,7 +296,7 @@ def test_z_stack_over_https_directory_form_is_rejected_clearly():
 
 
 @pytest.mark.integration
-def test_indexing_a_large_acquisition_opens_no_tiffs():
+def test_indexing_a_large_acquisition_opens_no_tiffs() -> None:
     """
     Construction must stay cheap: 306 GB and 23,760 planes should cost directory
     listings and one CSV parse, not 23,760 file opens.

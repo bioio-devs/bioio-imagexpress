@@ -84,7 +84,7 @@ MOSAIC_SELECTIONS = SELECTIONS + [
 
 
 @pytest.mark.parametrize("order_out, selection", MOSAIC_SELECTIONS)
-def test_indexed_read_matches_a_full_read(acquisition_unit: Path, order_out, selection):
+def test_indexed_read_matches_a_full_read(acquisition_unit: Path, order_out, selection) -> None:
     """
     The seam is an optimization, so it must be indistinguishable from reading the
     whole scene and slicing it.
@@ -111,7 +111,7 @@ def test_indexed_read_matches_a_full_read(acquisition_unit: Path, order_out, sel
 @pytest.mark.parametrize("order_out, selection", SELECTIONS)
 def test_indexed_read_matches_a_full_read_without_mosaic(
     acquisition_unit: Path, order_out, selection
-):
+) -> None:
     """
     The same equivalence for a single-tile scene, which is what ``mosaic=False``
     gives: no M on the data, so the seam resolves T, C and Z alone.
@@ -132,7 +132,7 @@ def test_indexed_read_matches_a_full_read_without_mosaic(
     assert np.array_equal(indexed, expected)
 
 
-def test_indexed_read_lands_on_the_right_planes(acquisition_unit: Path):
+def test_indexed_read_lands_on_the_right_planes(acquisition_unit: Path) -> None:
     """
     Shape equality would not catch a transposed T and C -- or a tile stacked at
     the wrong M -- so check the values.
@@ -151,7 +151,7 @@ def test_indexed_read_lands_on_the_right_planes(acquisition_unit: Path):
                     )
 
 
-def test_indexed_read_lands_on_the_right_planes_without_mosaic(acquisition_unit: Path):
+def test_indexed_read_lands_on_the_right_planes_without_mosaic(acquisition_unit: Path) -> None:
     """
     The same value check for a single-tile scene: with mosaic off the site comes
     from the scene id rather than from an M spec.
@@ -173,7 +173,7 @@ def test_indexed_read_lands_on_the_right_planes_without_mosaic(acquisition_unit:
 
 def test_a_single_plane_opens_a_single_file(
     acquisition_unit: Path, opened_planes: List[str]
-):
+) -> None:
     """Naming one tile of the well must not drag in the well's other tiles."""
     reader = Reader(acquisition_unit)
     reader.set_scene("B03")
@@ -188,7 +188,7 @@ def test_a_single_plane_opens_a_single_file(
 
 def test_a_single_plane_opens_a_single_file_without_mosaic(
     acquisition_unit: Path, opened_planes: List[str]
-):
+) -> None:
     """The same, for the scene-per-site layout where the tile is the scene."""
     reader = Reader(acquisition_unit, mosaic=False)
     reader.set_scene("B03-s1")
@@ -203,7 +203,7 @@ def test_a_single_plane_opens_a_single_file_without_mosaic(
 
 def test_only_the_selected_planes_are_opened(
     acquisition_unit: Path, opened_planes: List[str]
-):
+) -> None:
     """A 2x2x2x3 well scene holds 24 planes; this selection names 8 of them."""
     reader = Reader(acquisition_unit)
     opened_planes.clear()
@@ -217,7 +217,7 @@ def test_only_the_selected_planes_are_opened(
 
 def test_a_spatial_crop_still_opens_only_one_plane(
     acquisition_unit: Path, opened_planes: List[str]
-):
+) -> None:
     """
     A MetaXpress plane has no tiling to exploit, so the crop happens in memory --
     but it must not drag in any other plane.
@@ -233,7 +233,7 @@ def test_a_spatial_crop_still_opens_only_one_plane(
 
 def test_a_full_read_opens_every_plane(
     acquisition_unit: Path, opened_planes: List[str]
-):
+) -> None:
     """The seam must not accidentally drop planes from an unrestricted read."""
     reader = Reader(acquisition_unit)
     opened_planes.clear()
@@ -247,7 +247,7 @@ def test_a_full_read_opens_every_plane(
 # Interaction with the rest of the reader
 
 
-def test_indexed_read_respects_the_resolution_level(acquisition_unit: Path):
+def test_indexed_read_respects_the_resolution_level(acquisition_unit: Path) -> None:
     reader = Reader(acquisition_unit)
     reader.set_resolution_level(1)
 
@@ -257,7 +257,7 @@ def test_indexed_read_respects_the_resolution_level(acquisition_unit: Path):
     assert np.all(plane == plane_value("B02", 0, 1, 0, 2))
 
 
-def test_indexed_read_follows_the_current_scene(run_root: Path):
+def test_indexed_read_follows_the_current_scene(run_root: Path) -> None:
     reader = Reader(run_root)
 
     reader.set_scene("experiment_montage/B03")
@@ -271,7 +271,7 @@ def test_indexed_read_follows_the_current_scene(run_root: Path):
     assert experiment[0, 0] == plane_value("B02", 0, 0, 0, 0)
 
 
-def test_indexed_read_zero_fills_a_missing_plane(tmp_path: Path):
+def test_indexed_read_zero_fills_a_missing_plane(tmp_path: Path) -> None:
     unit = make_acquisition_unit(
         tmp_path / "ragged",
         skip_planes=[("B02", 0, 1, 1, 2)],
@@ -291,7 +291,7 @@ def test_indexed_read_zero_fills_a_missing_plane(tmp_path: Path):
     )
 
 
-def test_indexed_read_handles_sparse_coordinates(tmp_path: Path):
+def test_indexed_read_handles_sparse_coordinates(tmp_path: Path) -> None:
     """
     An aborted acquisition leaves gaps, so the on-disk Z values need not be
     ``0..n``. Specs index the coordinates that exist, not raw plane numbers.
@@ -314,7 +314,7 @@ def test_indexed_read_handles_sparse_coordinates(tmp_path: Path):
     )
 
 
-def test_indexed_read_of_an_empty_selection(acquisition_unit: Path):
+def test_indexed_read_of_an_empty_selection(acquisition_unit: Path) -> None:
     reader = Reader(acquisition_unit)
 
     empty = reader.get_image_data("TCZYX", Z=slice(0, 0))
@@ -322,7 +322,7 @@ def test_indexed_read_of_an_empty_selection(acquisition_unit: Path):
     assert empty.shape == (2, 2, 0, 32, 32)
 
 
-def test_dask_path_is_unaffected(acquisition_unit: Path):
+def test_dask_path_is_unaffected(acquisition_unit: Path) -> None:
     """``get_image_dask_data`` slices the graph and so never needed the seam."""
     reader = Reader(acquisition_unit)
 

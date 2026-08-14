@@ -31,7 +31,7 @@ RUN_ROOT = RESOURCES / "run_root"
 ###############################################################################
 
 
-def test_reads_a_real_z_stack_acquisition():
+def test_reads_a_real_z_stack_acquisition() -> None:
     """
     By default the sites of a well are treated as mosaic tiles, so a scene is a
     whole well and the two sites of the reference acquisition become the M axis.
@@ -45,7 +45,7 @@ def test_reads_a_real_z_stack_acquisition():
     assert reader.xarray_dask_data.attrs["missing_planes"] == []
 
 
-def test_reads_a_real_z_stack_acquisition_without_mosaic():
+def test_reads_a_real_z_stack_acquisition_without_mosaic() -> None:
     """Same acquisition with ``mosaic=False``: one scene per (well, site)."""
     reader = Reader(Z_STACK, mosaic=False)
 
@@ -56,13 +56,13 @@ def test_reads_a_real_z_stack_acquisition_without_mosaic():
     assert reader.xarray_dask_data.attrs["missing_planes"] == []
 
 
-def test_channel_names_from_a_real_descriptor():
+def test_channel_names_from_a_real_descriptor() -> None:
     reader = Reader(Z_STACK)
 
     assert reader.channel_names == ["TL", "FITC"]
 
 
-def test_pixel_sizes_from_a_real_descriptor():
+def test_pixel_sizes_from_a_real_descriptor() -> None:
     """
     The 10x objective calibration and 3 um Z step of the reference acquisition.
     Note the TIFF resolution tags are unset in real output, so these can only come
@@ -73,7 +73,7 @@ def test_pixel_sizes_from_a_real_descriptor():
     assert reader.physical_pixel_sizes == (3.0, 0.5817, 0.5817)
 
 
-def test_time_coords_from_a_real_manifest():
+def test_time_coords_from_a_real_manifest() -> None:
     reader = Reader(Z_STACK)
 
     coords = reader.xarray_dask_data.coords["T"].values
@@ -82,7 +82,7 @@ def test_time_coords_from_a_real_manifest():
     assert coords[1] == pytest.approx(21599.75, abs=1.0)
 
 
-def test_real_planes_carry_metaseries_metadata():
+def test_real_planes_carry_metaseries_metadata() -> None:
     reader = Reader(Z_STACK)
 
     metaseries = reader.xarray_dask_data.attrs["unprocessed"]["metaseries"]
@@ -91,7 +91,7 @@ def test_real_planes_carry_metaseries_metadata():
     assert metaseries["PlaneInfo"]["spatial-calibration-x"] == 0.5817
 
 
-def test_real_stage_positions_are_captured():
+def test_real_stage_positions_are_captured() -> None:
     reader = Reader(Z_STACK)
 
     metadata = reader.xarray_dask_data.attrs["unprocessed"]
@@ -102,7 +102,7 @@ def test_real_stage_positions_are_captured():
     assert metadata["stage_position_um"]["x"] == pytest.approx(67696.78)
 
 
-def test_pixels_match_the_source_tiff():
+def test_pixels_match_the_source_tiff() -> None:
     """
     Reads one acquisition position, so it runs with ``mosaic=False`` to name the
     site explicitly instead of leaning on the M axis defaulting to tile 0.
@@ -117,7 +117,7 @@ def test_pixels_match_the_source_tiff():
     assert np.array_equal(plane, expected)
 
 
-def test_real_planes_expose_their_pyramid():
+def test_real_planes_expose_their_pyramid() -> None:
     reader = Reader(Z_STACK)
 
     assert reader.resolution_levels == (0, 1, 2)
@@ -127,7 +127,7 @@ def test_real_planes_expose_their_pyramid():
     assert reader.physical_pixel_sizes == pytest.approx((3.0, 1.1634, 1.1634))
 
 
-def test_sidecars_and_thumbs_db_are_skipped():
+def test_sidecars_and_thumbs_db_are_skipped() -> None:
     """Both are present in the fixture, exactly as MetaXpress leaves them."""
     assert (Z_STACK / "timepoint0" / "Thumbs.db").exists()
     assert list(Z_STACK.glob("timepoint0/*.statistics.json"))
@@ -138,7 +138,7 @@ def test_sidecars_and_thumbs_db_are_skipped():
 ###############################################################################
 
 
-def test_real_run_root_exposes_both_units():
+def test_real_run_root_exposes_both_units() -> None:
     """With mosaic on, each unit contributes one scene per well."""
     reader = Reader(RUN_ROOT)
 
@@ -150,7 +150,7 @@ def test_real_run_root_exposes_both_units():
     )
 
 
-def test_real_run_root_exposes_both_units_without_mosaic():
+def test_real_run_root_exposes_both_units_without_mosaic() -> None:
     """
     With ``mosaic=False`` the sites stay separate scenes, which is what shows that
     the montage unit holds a single stitched site per well while the experiment it
@@ -168,13 +168,13 @@ def test_real_run_root_exposes_both_units_without_mosaic():
     )
 
 
-def test_real_autofocus_folder_is_not_a_unit():
+def test_real_autofocus_folder_is_not_a_unit() -> None:
     assert (RUN_ROOT / "autofocus").is_dir()
 
     assert not any(s.startswith("autofocus") for s in Reader(RUN_ROOT).scenes)
 
 
-def test_real_units_keep_distinct_pixel_sizes():
+def test_real_units_keep_distinct_pixel_sizes() -> None:
     """The 4x experiment and its montage differ from the 10x z-stack."""
     reader = Reader(RUN_ROOT)
 
@@ -184,13 +184,13 @@ def test_real_units_keep_distinct_pixel_sizes():
     assert reader.dims.shape == (2, 1, 1, 1, 64, 64)
 
 
-def test_accepts_a_real_jdce_file():
+def test_accepts_a_real_jdce_file() -> None:
     descriptor = next(Z_STACK.glob("*.jdce"))
 
     assert Reader(descriptor).scenes == ("B07", "B08")
 
 
-def test_accepts_a_real_jdce_file_without_mosaic():
+def test_accepts_a_real_jdce_file_without_mosaic() -> None:
     descriptor = next(Z_STACK.glob("*.jdce"))
 
     assert Reader(descriptor, mosaic=False).scenes == (
@@ -201,6 +201,6 @@ def test_accepts_a_real_jdce_file_without_mosaic():
     )
 
 
-def test_real_acquisition_satisfies_the_base_contract():
+def test_real_acquisition_satisfies_the_base_contract() -> None:
     test_utilities.check_local_file_not_open(Reader(Z_STACK))
     test_utilities.check_can_serialize_image_container(Reader(Z_STACK))

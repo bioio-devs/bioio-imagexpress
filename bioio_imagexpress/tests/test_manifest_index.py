@@ -36,7 +36,7 @@ class NoListingFileSystem(LocalFileSystem):
     HTTP endpoint does support; it is enumeration it will not do.
     """
 
-    def ls(self, path, detail=True, **kwargs):
+    def ls(self, path, detail=True, **kwargs) -> None:
         raise PermissionError(f"403 Forbidden: listing is not permitted ({path})")
 
 
@@ -70,7 +70,7 @@ def unlistable(monkeypatch) -> List[str]:
 
 def test_indexing_opens_only_the_descriptor_and_manifest(
     acquisition_unit: Path, monkeypatch
-):
+) -> None:
     """
     Forty-eight planes on disk, but indexing must touch neither them nor a listing.
     """
@@ -97,7 +97,7 @@ def test_indexing_opens_only_the_descriptor_and_manifest(
     assert distinct == ["Fixture.jdce", "image_metadata_1.csv"]
 
 
-def test_descriptor_names_its_manifests(acquisition_unit: Path):
+def test_descriptor_names_its_manifests(acquisition_unit: Path) -> None:
     descriptor = next(acquisition_unit.glob("*.jdce"))
 
     jdce = parsers.parse_jdce(descriptor.read_text())
@@ -105,7 +105,7 @@ def test_descriptor_names_its_manifests(acquisition_unit: Path):
     assert jdce.metadata_files == ["image_metadata_1.csv"]
 
 
-def test_resolve_metadata_csvs_prefers_the_descriptor(acquisition_unit: Path):
+def test_resolve_metadata_csvs_prefers_the_descriptor(acquisition_unit: Path) -> None:
     fs = LocalFileSystem()
     jdce = parsers.parse_jdce(next(acquisition_unit.glob("*.jdce")).read_text())
 
@@ -114,7 +114,7 @@ def test_resolve_metadata_csvs_prefers_the_descriptor(acquisition_unit: Path):
     assert [Path(p).name for p in resolved] == ["image_metadata_1.csv"]
 
 
-def test_resolve_metadata_csvs_falls_back_to_listing(acquisition_unit: Path):
+def test_resolve_metadata_csvs_falls_back_to_listing(acquisition_unit: Path) -> None:
     """A descriptor that does not name its manifests must still resolve them."""
     fs = LocalFileSystem()
     jdce = parsers.JdceMetadata()  # no metadata_files
@@ -130,7 +130,7 @@ def test_resolve_metadata_csvs_falls_back_to_listing(acquisition_unit: Path):
 
 def test_reads_through_a_filesystem_that_cannot_list(
     acquisition_unit: Path, unlistable: List[str]
-):
+) -> None:
     descriptor = next(acquisition_unit.glob("*.jdce"))
 
     reader = Reader(descriptor)
@@ -150,7 +150,7 @@ def test_reads_through_a_filesystem_that_cannot_list(
 
 def test_pixels_read_through_a_filesystem_that_cannot_list(
     acquisition_unit: Path, unlistable: List[str]
-):
+) -> None:
     """The tile a plane belongs to is composed from the manifest, not listed."""
     from .conftest import plane_value
 
@@ -164,7 +164,7 @@ def test_pixels_read_through_a_filesystem_that_cannot_list(
 
 def test_tile_pixels_read_through_a_filesystem_that_cannot_list(
     acquisition_unit: Path, unlistable: List[str]
-):
+) -> None:
     """The same plane, reached with mosaic off, where the site is its own scene."""
     from .conftest import plane_value
 
@@ -178,7 +178,7 @@ def test_tile_pixels_read_through_a_filesystem_that_cannot_list(
 
 def test_a_directory_is_still_rejected_when_listing_is_impossible(
     acquisition_unit: Path, unlistable: List[str]
-):
+) -> None:
     """
     Pointing at the directory cannot work without listing -- the descriptor's name
     is unknowable. The error must say so rather than fail obscurely.
@@ -202,7 +202,7 @@ MISSING_PLANES = [
 
 
 @pytest.mark.parametrize("victim", MISSING_PLANES)
-def test_one_absent_plane_never_costs_the_whole_scene(tmp_path: Path, victim: str):
+def test_one_absent_plane_never_costs_the_whole_scene(tmp_path: Path, victim: str) -> None:
     """
     Manifest-driven indexing composes plane paths without confirming them, so any
     one of them may be missing on a part-copied acquisition. Losing the plane the
@@ -231,7 +231,7 @@ def test_one_absent_plane_never_costs_the_whole_scene(tmp_path: Path, victim: st
 
 
 @pytest.mark.parametrize("victim", MISSING_PLANES)
-def test_one_absent_plane_never_costs_the_whole_tile(tmp_path: Path, victim: str):
+def test_one_absent_plane_never_costs_the_whole_tile(tmp_path: Path, victim: str) -> None:
     """The same partial acquisition with mosaic off, where the scene is one site."""
     unit = make_acquisition_unit(tmp_path / "partial")
     (unit / victim).unlink()
@@ -253,7 +253,7 @@ def test_one_absent_plane_never_costs_the_whole_tile(tmp_path: Path, victim: str
     )
 
 
-def test_a_scene_with_no_readable_plane_still_raises(tmp_path: Path):
+def test_a_scene_with_no_readable_plane_still_raises(tmp_path: Path) -> None:
     """Degrading is for partial loss; a scene with nothing behind it is an error."""
     unit = make_acquisition_unit(
         tmp_path / "gone", wells=["B02"], sites=[0], channels=["TL"], t_count=1
@@ -283,14 +283,14 @@ class DeniedListingFileSystem(LocalFileSystem):
     class NotAnOSError(Exception):
         pass
 
-    def ls(self, path, detail=True, **kwargs):
+    def ls(self, path, detail=True, **kwargs) -> None:
         raise self.NotAnOSError("403 Forbidden")
 
-    def isdir(self, path):
+    def isdir(self, path) -> None:
         raise self.NotAnOSError("403 Forbidden")
 
 
-def test_discovery_survives_a_non_oserror_refusal(acquisition_unit: Path, monkeypatch):
+def test_discovery_survives_a_non_oserror_refusal(acquisition_unit: Path, monkeypatch) -> None:
     """`discover_units` must answer, not raise, when the backend refuses."""
     fs = DeniedListingFileSystem()
     descriptor = str(next(acquisition_unit.glob("*.jdce")))
@@ -304,7 +304,7 @@ def test_discovery_survives_a_non_oserror_refusal(acquisition_unit: Path, monkey
     assert parsers._names_in(fs, str(acquisition_unit)) == []
 
 
-def test_is_supported_image_answers_rather_than_raising(acquisition_unit: Path):
+def test_is_supported_image_answers_rather_than_raising(acquisition_unit: Path) -> None:
     """
     bioio calls this hook while probing every registered plugin, so a raise here
     would break routing for unrelated formats, not just this one.
@@ -319,7 +319,7 @@ def test_is_supported_image_answers_rather_than_raising(acquisition_unit: Path):
 # Fallbacks
 
 
-def test_falls_back_to_walking_without_a_manifest(tmp_path: Path):
+def test_falls_back_to_walking_without_a_manifest(tmp_path: Path) -> None:
     unit = make_acquisition_unit(tmp_path / "without", write_csv=False)
 
     reader = Reader(unit)
@@ -328,7 +328,7 @@ def test_falls_back_to_walking_without_a_manifest(tmp_path: Path):
     assert reader.xarray_dask_data.attrs["unprocessed"]["indexed_from"] == "filenames"
 
 
-def test_falls_back_to_walking_when_the_named_manifest_is_gone(tmp_path: Path):
+def test_falls_back_to_walking_when_the_named_manifest_is_gone(tmp_path: Path) -> None:
     """The descriptor names a manifest that was never copied."""
     unit = make_acquisition_unit(tmp_path / "no_csv")
     (unit / "image_metadata_1.csv").unlink()
@@ -339,7 +339,7 @@ def test_falls_back_to_walking_when_the_named_manifest_is_gone(tmp_path: Path):
     assert reader.xarray_dask_data.attrs["unprocessed"]["indexed_from"] == "filenames"
 
 
-def test_manifest_index_matches_the_verified_index(tmp_path: Path):
+def test_manifest_index_matches_the_verified_index(tmp_path: Path) -> None:
     """
     On an intact acquisition the fast path and the walk must agree exactly.
     """
@@ -354,7 +354,7 @@ def test_manifest_index_matches_the_verified_index(tmp_path: Path):
     assert fast.standard_metadata == verified.standard_metadata
 
 
-def test_a_planeless_descriptor_is_not_claimed(tmp_path: Path):
+def test_a_planeless_descriptor_is_not_claimed(tmp_path: Path) -> None:
     """A protocol definition with no planes behind it is not an acquisition."""
     empty = tmp_path / "protocol"
     empty.mkdir()

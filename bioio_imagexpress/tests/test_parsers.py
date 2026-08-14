@@ -39,7 +39,7 @@ from .conftest import build_jdce
         ("Proj_t0_B02_s0_w0_z0.tiff", ("Proj", 0, "B02", 0, 0, 0)),
     ],
 )
-def test_parse_plane_name_accepts_real_forms(name, expected):
+def test_parse_plane_name_accepts_real_forms(name, expected) -> None:
     parsed = parsers.parse_plane_name(name)
 
     assert parsed is not None
@@ -67,7 +67,7 @@ def test_parse_plane_name_accepts_real_forms(name, expected):
         "not-a-plane.tif",
     ],
 )
-def test_parse_plane_name_rejects_non_planes(name):
+def test_parse_plane_name_rejects_non_planes(name) -> None:
     assert parsers.parse_plane_name(name) is None
 
 
@@ -75,11 +75,11 @@ def test_parse_plane_name_rejects_non_planes(name):
     "name",
     ["Thumbs.db", "thumbs.db", ".DS_Store", "x_t0_B02_s0_w0_z0.tif.statistics.json"],
 )
-def test_is_ignorable(name):
+def test_is_ignorable(name) -> None:
     assert parsers.is_ignorable(name)
 
 
-def test_is_ignorable_passes_planes():
+def test_is_ignorable_passes_planes() -> None:
     assert not parsers.is_ignorable("Proj_t0_B02_s0_w0_z0.tif")
 
 
@@ -96,19 +96,19 @@ def test_is_ignorable_passes_planes():
         ("  G - 11 ", "G11"),
     ],
 )
-def test_normalize_well(raw, expected):
+def test_normalize_well(raw, expected) -> None:
     assert parsers.normalize_well(raw) == expected
 
 
 @pytest.mark.parametrize("raw", ["", "not a well", "12", None])
-def test_normalize_well_rejects_junk(raw):
+def test_normalize_well_rejects_junk(raw) -> None:
     assert parsers.normalize_well(raw) is None
 
 
 ###############################################################################
 
 
-def test_parse_jdce_extracts_acquisition_parameters():
+def test_parse_jdce_extracts_acquisition_parameters() -> None:
     contents = json.dumps(build_jdce(["TL", "FITC"], z_count=11, t_count=9))
 
     metadata = parsers.parse_jdce(contents)
@@ -124,7 +124,7 @@ def test_parse_jdce_extracts_acquisition_parameters():
     assert metadata.acquired_at == datetime(2026, 8, 4, 10, 31, 10)
 
 
-def test_parse_jdce_ignores_the_creation_time_zone_offset():
+def test_parse_jdce_ignores_the_creation_time_zone_offset() -> None:
     """
     MetaXpress writes 0 regardless of where the instrument is, so applying it
     would relabel an accurate local time as an inaccurate absolute one.
@@ -138,7 +138,7 @@ def test_parse_jdce_ignores_the_creation_time_zone_offset():
     assert acquired_at.tzinfo is None
 
 
-def test_parse_jdce_falls_back_to_the_station_login():
+def test_parse_jdce_falls_back_to_the_station_login() -> None:
     raw = build_jdce(["TL"], z_count=1, t_count=1)
     del raw["ImageStack"]["AutoLeadAcquisitionProtocol"]["ProjectInformation"]["User"]
 
@@ -149,7 +149,7 @@ def test_parse_jdce_falls_back_to_the_station_login():
     "raw, expected",
     [("1 X 1", "1x1"), ("2 x 2", "2x2"), ("1x1", "1x1"), ("", None), (None, None)],
 )
-def test_parse_jdce_normalizes_binning(raw, expected):
+def test_parse_jdce_normalizes_binning(raw, expected) -> None:
     descriptor = build_jdce(["TL"], z_count=1, t_count=1)
     descriptor["ImageStack"]["AutoLeadAcquisitionProtocol"]["Camera"]["Binning"] = raw
 
@@ -157,14 +157,14 @@ def test_parse_jdce_normalizes_binning(raw, expected):
 
 
 @pytest.mark.parametrize("creation", [{}, {"Date": "not-a-date"}])
-def test_parse_jdce_tolerates_an_unusable_creation_block(creation):
+def test_parse_jdce_tolerates_an_unusable_creation_block(creation) -> None:
     raw = build_jdce(["TL"], z_count=1, t_count=1)
     raw["ImageStack"]["Creation"] = creation
 
     assert parsers.parse_jdce(json.dumps(raw)).acquired_at is None
 
 
-def test_parse_jdce_orders_channels_by_index():
+def test_parse_jdce_orders_channels_by_index() -> None:
     raw = build_jdce(["TL", "FITC"], z_count=1, t_count=1)
     wavelengths = raw["ImageStack"]["AutoLeadAcquisitionProtocol"]["Wavelengths"]
     wavelengths.reverse()
@@ -172,7 +172,7 @@ def test_parse_jdce_orders_channels_by_index():
     assert parsers.parse_jdce(json.dumps(raw)).channel_names == ["TL", "FITC"]
 
 
-def test_parse_jdce_tolerates_a_sparse_descriptor():
+def test_parse_jdce_tolerates_a_sparse_descriptor() -> None:
     metadata = parsers.parse_jdce(json.dumps({"ImageStack": {}}))
 
     assert metadata.channel_names == []
@@ -180,7 +180,7 @@ def test_parse_jdce_tolerates_a_sparse_descriptor():
     assert metadata.z_step is None
 
 
-def test_parse_jdce_falls_back_to_plate_z_step():
+def test_parse_jdce_falls_back_to_plate_z_step() -> None:
     raw = build_jdce(["TL"], z_count=5, t_count=1)
     protocol = raw["ImageStack"]["AutoLeadAcquisitionProtocol"]
     for wavelength in protocol["Wavelengths"]:
@@ -193,7 +193,7 @@ def test_parse_jdce_falls_back_to_plate_z_step():
 ###############################################################################
 
 
-def test_read_image_metadata_csv_maps_columns():
+def test_read_image_metadata_csv_maps_columns() -> None:
     contents = (
         "Well,Row,Column,Field,Wavelength,Timepoint,ZIndex,"
         "ImageSubFolderPath,ImageFileName,TimeStampSec,ExcitationEmissionFilter,"
@@ -213,7 +213,7 @@ def test_read_image_metadata_csv_maps_columns():
     assert row.position_x_um == pytest.approx(67696.78)
 
 
-def test_read_image_metadata_csv_falls_back_to_the_filename():
+def test_read_image_metadata_csv_falls_back_to_the_filename() -> None:
     # Coordinate columns blank -- the filename must still resolve the plane.
     contents = (
         "Well,Field,Wavelength,Timepoint,ZIndex,ImageSubFolderPath,ImageFileName\n"
@@ -234,7 +234,7 @@ def test_read_image_metadata_csv_falls_back_to_the_filename():
     assert rows[0].subfolder == "timepoint3"
 
 
-def test_read_image_metadata_csv_drops_unresolvable_rows():
+def test_read_image_metadata_csv_drops_unresolvable_rows() -> None:
     contents = (
         "Well,Field,Wavelength,Timepoint,ZIndex,ImageSubFolderPath,ImageFileName\n"
         ",,,,,,mystery.tif\n"
