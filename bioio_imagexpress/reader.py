@@ -105,6 +105,8 @@ class Reader(BaseReader):
         # index because wells within one unit can differ in shape.
         self._scene_levels: Dict[int, Tuple[List[Tuple[int, ...]], np.dtype]] = {}
 
+        self._scenes: Optional[Tuple[str, ...]] = None
+
     @staticmethod
     def _is_supported_image(fs: AbstractFileSystem, path: str, **kwargs: Any) -> bool:
         return acquisition.discover_unit(fs, path) is not None
