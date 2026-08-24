@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 import datetime
 from typing import Any, Dict, Optional
 
@@ -86,20 +83,14 @@ def test_imagexpress_standard_metadata(
     for key, expected in expected_dict.items():
         assert key in sm_dict, f"Key '{key}' missing from standard_metadata.to_dict()"
         result = sm_dict[key]
-
-        # timedelta: allow slight tolerance
         if isinstance(expected, datetime.timedelta):
             assert isinstance(result, datetime.timedelta)
             diff = abs(result.total_seconds() - expected.total_seconds())
             assert (
                 diff < 1e-3
             ), f"{key} expected {expected}, got {result} (delta={diff}s)"
-
-        # floats: approx compare
         elif isinstance(expected, float):
             assert result == pytest.approx(expected, rel=1e-9, abs=1e-12)
-
-        # exact match for everything else
         else:
             assert result == expected, f"{key} expected {expected}, got {result}"
 

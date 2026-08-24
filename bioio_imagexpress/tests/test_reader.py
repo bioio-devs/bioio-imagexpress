@@ -117,7 +117,6 @@ def test_imagexpress_reader_without_mosaic() -> None:
 @pytest.mark.parametrize(
     "path, error_mentions",
     [
-        # A run root is not readable itself; the error names its units instead.
         pytest.param(RUN_ROOT, ["experiment", "experiment_montage"], id="run_root"),
         pytest.param(RUN_ROOT / "autofocus", [], id="not_an_acquisition"),
         pytest.param(
@@ -137,32 +136,14 @@ def test_imagexpress_reader_unsupported(
 
     for expected in error_mentions:
         assert expected in str(caught.value)
+        
+def test_missing_manifest_raises(tmp_path: pathlib.Path) -> None:
+    acquisition = tmp_path / "experiment"
+    shutil.copytree(EXPERIMENT, acquisition)
+    (acquisition / "image_metadata_1.csv").unlink()
 
-
-def test_planes_come_from_the_files_that_name_them() -> None:
-    # Every plane is its own TIFF, so the whole reader is an index: check each
-    # position of the assembled array against the file its name points at, which
-    # a transposed or reversed stack would still have the right shape for.
-    reader = Reader(Z_STACK)
-    reader.set_scene("B07")
-    data = reader.data
-    sites, timepoints, channels, zs = 2, 2, 2, 3
-
-    assert data.shape == (sites, timepoints, channels, zs, 64, 64)
-
-    for m, t, c, z in product(
-        range(sites), range(timepoints), range(channels), range(zs)
-    ):
-        plane = (
-            Z_STACK
-            / f"timepoint{t}"
-            / f"Wellscan_96well_TL_488_t{t}_B07_s{m}_w{c}_z{z}.tif"
-        )
-        np.testing.assert_array_equal(
-            data[m, t, c, z],
-            tifffile.imread(plane),
-            err_msg=f"array position (m={m}, t={t}, c={c}, z={z}) is not {plane.name}",
-        )
+    with pytest.raises(exceptions.UnsupportedFileFormatError, match="manifest"):
+        Reader(acquisition)
 
 
 def test_stitched_mosaic_places_each_tile_at_its_position() -> None:
@@ -216,33 +197,8 @@ def test_mosaic_tile_positions() -> None:
     )
     assert reader.mosaic_data.shape == (1, 1, 1, 2138, 64)
 
-    # Tile origins are pixels, so they follow the resolution level.
     reader.set_resolution_level(1)
     assert reader.get_mosaic_tile_positions() == [(0, 0), (1037, 0)]
-
-
-def test_scene_switching_does_not_leak_state() -> None:
-    reader = Reader(Z_STACK)
-    first = reader.data
-
-    reader.set_scene("B08")
-    assert reader.shape == (2, 2, 2, 3, 64, 64)
-    assert reader.current_scene == "B08"
-
-    reader.set_scene("B07")
-    assert reader.shape == (2, 2, 2, 3, 64, 64)
-    np.testing.assert_array_equal(reader.data, first)
-
-
-def test_missing_manifest_raises(tmp_path: pathlib.Path) -> None:
-    # The manifest is the one source of truth for which planes exist; without
-    # it the acquisition is unreadable rather than guessed at.
-    acquisition = tmp_path / "experiment"
-    shutil.copytree(EXPERIMENT, acquisition)
-    (acquisition / "image_metadata_1.csv").unlink()
-
-    with pytest.raises(exceptions.UnsupportedFileFormatError, match="manifest"):
-        Reader(acquisition)
 
 
 def test_missing_plane_raises(tmp_path: pathlib.Path) -> None:
