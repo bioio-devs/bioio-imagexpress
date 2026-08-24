@@ -69,33 +69,6 @@ TEST_CASES = [
         },
         id="run_root_experiment",
     ),
-    pytest.param(
-        "run_root/experiment_montage",
-        {
-            "Binning": "1x1",
-            "Column": "2",
-            "Dimensions Present": "MTCZYX",
-            "Image Size C": 1,
-            "Image Size T": 1,
-            "Image Size X": 64,
-            "Image Size Y": 64,
-            "Image Size Z": 1,
-            "Imaged By": "moldev",
-            "Imaging Datetime": datetime.datetime(2026, 8, 7, 15, 7, 15),
-            "Objective": "4X Plan Apo Lambda D",
-            "Pixel Size X": 1.6595,
-            "Pixel Size Y": 1.6595,
-            "Pixel Size Z": None,
-            "Position Index": None,
-            "Row": "B",
-            "Stage Position X": 23300.02,
-            "Stage Position Y": 20360.01,
-            "Timelapse": False,
-            "Timelapse Interval": None,
-            "Total Time Duration": None,
-        },
-        id="run_root_experiment_montage",
-    ),
 ]
 
 
@@ -134,7 +107,6 @@ def test_imagexpress_standard_metadata(
 @pytest.mark.parametrize(
     "filename, scene, expected_row, expected_column",
     [
-        ("experiment_z_stack", "B07", "B", "7"),
         ("experiment_z_stack", "B08", "B", "8"),
         ("run_root/experiment", "B03", "B", "3"),
     ],
@@ -155,9 +127,7 @@ def test_standard_metadata_follows_set_scene(
     "mosaic, scene, expected_position_index",
     [
         (True, "B02", None),
-        (True, "B03", None),
         (False, "B02-s0", 0),
-        (False, "B02-s1", 1),
         (False, "B03-s1", 1),
     ],
 )

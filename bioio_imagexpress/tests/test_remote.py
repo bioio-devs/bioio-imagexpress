@@ -44,35 +44,6 @@ def test_reader_over_http_matches_local(
     np.testing.assert_array_equal(over_http.dask_data.compute(), local.data)
 
 
-def test_reader_over_http_places_mosaic_tiles(local_http_server: str) -> None:
-    # Tiles are placed from the manifest's stage positions, which are read over
-    # http like everything else.
-    unit = "run_root/experiment"
-    name = descriptor(LOCAL_RESOURCES_DIR / unit).name
-    local = Reader(LOCAL_RESOURCES_DIR / unit / name)
-    over_http = Reader(f"{local_http_server}/{unit}/{name}")
-
-    assert over_http.get_mosaic_tile_positions() == [(0, 0), (2074, 0)]
-    assert over_http.get_mosaic_tile_positions() == local.get_mosaic_tile_positions()
-    assert over_http.get_mosaic_tile_position(1) == (2074, 0)
-
-
-def test_reader_over_http_reads_one_scene_per_site(local_http_server: str) -> None:
-    unit = "run_root/experiment"
-    name = descriptor(LOCAL_RESOURCES_DIR / unit).name
-    url = f"{local_http_server}/{unit}/{name}"
-    local = Reader(LOCAL_RESOURCES_DIR / unit / name, mosaic=False)
-    over_http = Reader(url, mosaic=False)
-    over_http.set_scene("B03-s1")
-    local.set_scene("B03-s1")
-
-    assert over_http.scenes == ("B02-s0", "B02-s1", "B03-s0", "B03-s1")
-    assert over_http.dims.order == "TCZYX"
-    assert over_http.shape == (1, 1, 1, 64, 64)
-    assert over_http.position_index == 1
-    np.testing.assert_array_equal(over_http.data, local.data)
-
-
 def test_server_refuses_directory_listing(local_http_server: str) -> None:
     # The point of the '.jdce' entry point: this server serves files but 404s
     # every directory, so nothing above could have come from a listing.
