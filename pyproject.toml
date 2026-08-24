@@ -50,7 +50,6 @@ lint = [
   "pre-commit>=2.20.0",
 ]
 test = [
-  "aiohttp>=3.8.0",  # fsspec's http backend, for the simulated remote reads
   "bioio>=3.0.0",  # plugin routing test
   "coverage>=5.1",
   "pytest>=5.4.3",

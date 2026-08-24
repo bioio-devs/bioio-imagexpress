@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 import tifffile
 from bioio_base import dimensions, exceptions, test_utilities
+from fsspec.implementations.local import LocalFileSystem
 
 from bioio_imagexpress import Reader, ReaderMetadata
 
@@ -398,6 +399,21 @@ def test_missing_plane_raises(tmp_path: pathlib.Path) -> None:
 
     with pytest.raises(FileNotFoundError):
         reader.data
+
+
+def test_reads_without_directory_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The object stores plates are archived to serve files without listing
+    # directories, so an acquisition named by its descriptor must resolve from
+    # the descriptor and manifests alone.
+    def refuse(self: Any, *args: Any, **kwargs: Any) -> None:
+        raise OSError("Directory listing is not available")
+
+    monkeypatch.setattr(LocalFileSystem, "ls", refuse)
+
+    reader = Reader(descriptor(Z_STACK))
+    assert reader.scenes == ("B07", "B08")
+    assert reader.channel_names == ["TL", "FITC"]
+    assert reader.data.shape == (2, 2, 2, 3, 64, 64)
 
 
 def test_reader_metadata() -> None:
