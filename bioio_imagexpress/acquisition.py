@@ -20,20 +20,8 @@ log = logging.getLogger(__name__)
 JDCE_EXTENSION = ".jdce"
 TIMEPOINT_DIR_PREFIX = "timepoint"
 
-# <Project>_t<T>_<Well>_s<Site>_w<Channel>_z<Z>.tif, all indices zero-based.
-# Rows run A-Z then AA-AF, so a 1536-well plate has two-letter rows.
-FILENAME_RE = re.compile(
-    r"^(?P<prefix>.+)"
-    r"_t(?P<t>\d+)"
-    r"_(?P<well>[A-Z]{1,2}\d{2})"
-    r"_s(?P<site>\d+)"
-    r"_w(?P<channel>\d+)"
-    r"_z(?P<z>\d+)"
-    r"\.tiff?$",
-    re.IGNORECASE,
-)
-
-# A normalized well label: row letters then an unpadded-or-padded column.
+# A normalized well label: row letters then a column number. Rows run A-Z then
+# AA-AF, so a 1536-well plate has two-letter rows.
 WELL_RE = re.compile(r"^([A-Z]{1,2})(\d+)$")
 
 # (well, site) -- one acquisition position.
@@ -42,45 +30,6 @@ SceneKey = Tuple[str, int]
 PlaneKey = Tuple[int, int, int]
 
 ###############################################################################
-
-
-@dataclass(frozen=True)
-class PlaneName:
-    """A decomposed plane filename."""
-
-    t: int
-    well: str
-    site: int
-    channel: int
-    z: int
-
-
-def parse_plane_name(name: str) -> Optional[PlaneName]:
-    """
-    Decompose a plane filename, or return None if it is not one.
-
-    Parameters
-    ----------
-    name: str
-        A file name, without any directory part.
-
-    Returns
-    -------
-    plane: Optional[PlaneName]
-        The plane's coordinates, or None for the sidecars and OS files that live
-        beside the planes.
-    """
-    match = FILENAME_RE.match(name)
-    if match is None:
-        return None
-
-    return PlaneName(
-        t=int(match.group("t")),
-        well=match.group("well").upper(),
-        site=int(match.group("site")),
-        channel=int(match.group("channel")),
-        z=int(match.group("z")),
-    )
 
 
 def normalize_well(value: str) -> Optional[str]:
@@ -113,7 +62,7 @@ def split_well(well: str) -> Tuple[str, int]:
     Parameters
     ----------
     well: str
-        A label as ``normalize_well`` or ``parse_plane_name`` produce it.
+        A label as ``normalize_well`` produces it.
 
     Returns
     -------
@@ -159,7 +108,7 @@ def parse_jdce(contents: str) -> JdceMetadata:
     -------
     metadata: JdceMetadata
         Every field is optional; a sparse descriptor yields Nones rather than
-        raising, so the read can fall back to the manifest and the filenames.
+        raising, so the read can fall back to the manifest.
     """
     raw = json.loads(contents)
     stack = raw.get("ImageStack", {})
@@ -283,7 +232,8 @@ def read_manifest(contents: str) -> List[ManifestRow]:
     rows: List[ManifestRow]
         One row per plane. Rows that do not resolve to a full (well, site,
         channel, t, z) coordinate are dropped. A manifest that yields no rows at
-        all sends ``build_unit`` to the filename walk instead.
+        all leaves the acquisition unreadable; the manifest is the one source
+        of truth for which planes exist.
     """
     rows = []
 
@@ -486,8 +436,9 @@ def build_unit(
     unit: AcquisitionUnit
         Indexed from the ``image_metadata_*.csv`` manifests, which name every
         plane's subfolder and filename, so the whole unit resolves without
-        listing a directory. Falls back to walking ``timepoint<N>`` and parsing
-        the filename grammar when no manifest can be read.
+        listing a directory. The manifests are the one source of truth for
+        which planes exist: a unit whose manifests cannot be read indexes no
+        planes, which the reader refuses.
     """
     unit = AcquisitionUnit(path=path, jdce=_read_jdce(fs, descriptor))
 
@@ -499,10 +450,7 @@ def build_unit(
         except Exception as exc:
             log.warning("Could not read manifest %s: %s", manifest, exc)
 
-    if rows:
-        _index_from_manifest(unit, rows)
-    else:
-        _index_from_walk(fs, unit)
+    _index_from_manifest(unit, rows)
 
     return unit
 
@@ -575,19 +523,6 @@ def _index_from_manifest(unit: AcquisitionUnit, rows: List[ManifestRow]) -> None
 
         if scene not in unit.positions and row.position_x_um is not None:
             unit.positions[scene] = (row.position_x_um, row.position_y_um)
-
-
-def _index_from_walk(fs: AbstractFileSystem, unit: AcquisitionUnit) -> None:
-    for timepoint_dir in find_timepoint_dirs(fs, unit.path):
-        for name in sorted(_names_in(fs, timepoint_dir)):
-            plane = parse_plane_name(name)
-            if plane is None:
-                continue
-
-            unit.planes.setdefault((plane.well, plane.site), {}).setdefault(
-                (plane.t, plane.channel, plane.z),
-                posixpath.join(timepoint_dir, name),
-            )
 
 
 def _names_in(fs: AbstractFileSystem, path: str) -> List[str]:

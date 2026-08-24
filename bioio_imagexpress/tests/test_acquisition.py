@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 import pathlib
 import shutil
 from datetime import datetime
@@ -24,33 +21,6 @@ def build_unit(directory: pathlib.Path) -> acquisition.AcquisitionUnit:
     assert discovered is not None
 
     return acquisition.build_unit(fs, *discovered)
-
-
-@pytest.mark.parametrize(
-    "name, expected",
-    [
-        (
-            "Wellscan_96well_TL_488_t0_B07_s0_w1_z2.tif",
-            acquisition.PlaneName(t=0, well="B07", site=0, channel=1, z=2),
-        ),
-        (
-            "4X_Lumenoid_Cellvis_96_8-7-2026_t0_B03_s1_w0_z0.tif",
-            acquisition.PlaneName(t=0, well="B03", site=1, channel=0, z=0),
-        ),
-        (
-            # A 1536-well plate's two letter row.
-            "Scan_t0_AA01_s0_w0_z0.tif",
-            acquisition.PlaneName(t=0, well="AA01", site=0, channel=0, z=0),
-        ),
-        ("Thumbs.db", None),
-        ("Wellscan_96well_TL_488_t0_B07_s0_w0_z0.tif.statistics.json", None),
-        ("focus_report.txt", None),
-        # A single digit well is not the grammar's two digit token.
-        ("Wellscan_96well_TL_488_t0_B7_s0_w0_z0.tif", None),
-    ],
-)
-def test_parse_plane_name(name: str, expected: Optional[acquisition.PlaneName]) -> None:
-    assert acquisition.parse_plane_name(name) == expected
 
 
 @pytest.mark.parametrize(
@@ -186,14 +156,11 @@ def test_acquisition_unit_accessors(
     assert unit.time_coords(keys) == pytest.approx(expected_time_coords)
 
 
-def test_acquisition_unit_time_coords_without_manifest(
-    tmp_path: pathlib.Path,
-) -> None:
+def test_build_unit_without_manifest_indexes_nothing(tmp_path: pathlib.Path) -> None:
     copied = tmp_path / "experiment"
     shutil.copytree(EXPERIMENT, copied)
     (copied / "image_metadata_1.csv").unlink()
 
     unit = build_unit(copied)
 
-    assert unit.wells == ["B02", "B03"]
-    assert unit.time_coords(unit.scene_keys) is None
+    assert unit.planes == {}

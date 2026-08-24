@@ -90,7 +90,11 @@ class Reader(BaseReader):
             raise exceptions.UnsupportedFileFormatError(
                 self.__class__.__name__,
                 self._path,
-                msg_extra="No readable planes were found in this acquisition.",
+                msg_extra=(
+                    "No plane could be indexed from the acquisition's "
+                    "'image_metadata_*.csv' manifests, which are the reader's "
+                    "source of truth for which planes exist."
+                ),
             )
 
         if mosaic and not self._tiles_placeable():
