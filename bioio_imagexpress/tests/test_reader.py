@@ -91,14 +91,15 @@ def test_imagexpress_reader(
     )
 
 
-@pytest.mark.parametrize("set_scene", ["B02-s0", "B02-s1", "B03-s0", "B03-s1"])
-def test_imagexpress_reader_without_mosaic(set_scene: str) -> None:
+def test_imagexpress_reader_without_mosaic() -> None:
+    # One scene stands in for all four: per-scene pixel correctness is covered
+    # by test_tiles_without_mosaic_match_mosaic_tiles.
     test_utilities.run_image_file_checks(
         ImageContainer=Reader,
         image=EXPERIMENT,
-        set_scene=set_scene,
+        set_scene="B03-s1",
         expected_scenes=("B02-s0", "B02-s1", "B03-s0", "B03-s1"),
-        expected_current_scene=set_scene,
+        expected_current_scene="B03-s1",
         expected_shape=(1, 1, 1, 64, 64),
         expected_dtype=np.uint16,
         expected_dims_order=dimensions.DEFAULT_DIMENSION_ORDER,
@@ -226,27 +227,19 @@ def test_ragged_acquisition_keeps_the_completed_tiles(tmp_path: pathlib.Path) ->
     np.testing.assert_array_equal(reader.data, expected.data)
 
 
-@pytest.mark.parametrize(
-    "acquisition, expected_shapes, expected_pixel_sizes",
-    [
-        (
-            Z_STACK,
-            [(2, 2, 2, 3, 64, 64), (2, 2, 2, 3, 32, 32), (2, 2, 2, 3, 16, 16)],
-            [(3.0, 0.5817, 0.5817), (3.0, 1.1634, 1.1634), (3.0, 2.3268, 2.3268)],
-        ),
-        (
-            EXPERIMENT,
-            [(2, 1, 1, 1, 64, 64), (2, 1, 1, 1, 32, 32), (2, 1, 1, 1, 16, 16)],
-            [(None, 1.6595, 1.6595), (None, 3.319, 3.319), (None, 6.638, 6.638)],
-        ),
-    ],
-)
-def test_resolution_levels(
-    acquisition: pathlib.Path,
-    expected_shapes: List[Tuple[int, ...]],
-    expected_pixel_sizes: List[Tuple[Optional[float], float, float]],
-) -> None:
-    reader = Reader(acquisition)
+def test_resolution_levels() -> None:
+    # The level scaling math does not depend on the unit, so one unit suffices.
+    expected_shapes = [
+        (2, 2, 2, 3, 64, 64),
+        (2, 2, 2, 3, 32, 32),
+        (2, 2, 2, 3, 16, 16),
+    ]
+    expected_pixel_sizes = [
+        (3.0, 0.5817, 0.5817),
+        (3.0, 1.1634, 1.1634),
+        (3.0, 2.3268, 2.3268),
+    ]
+    reader = Reader(Z_STACK)
     assert reader.resolution_levels == (0, 1, 2)
 
     for level, (shape, pixel_sizes) in enumerate(
@@ -374,16 +367,23 @@ def test_walk_fallback_without_manifest(tmp_path: pathlib.Path) -> None:
 
     reader = Reader(acquisition)
 
-    assert reader.scenes == ("B02", "B03")
-    assert reader.shape == (2, 1, 1, 1, 64, 64)
+    # Stage positions are manifest-only, so the wells cannot be stitched and the
+    # reader falls back to one scene per acquisition position.
+    assert reader.scenes == ("B02-s0", "B02-s1", "B03-s0", "B03-s1")
+    assert reader.shape == (1, 1, 1, 64, 64)
     # Channel names still come from the descriptor.
     assert reader.channel_names == ["TL"]
     assert reader.physical_pixel_sizes == (None, 1.6595, 1.6595)
-    # Timestamps and stage positions are manifest-only.
+    # Timestamps are manifest-only too.
     assert dimensions.DimensionNames.Time not in reader.xarray_dask_data.coords
     assert reader.stage_position == (None, None)
     assert reader.total_time_duration is None
-    np.testing.assert_array_equal(reader.data, Reader(EXPERIMENT).data)
+    np.testing.assert_array_equal(reader.data, Reader(EXPERIMENT, mosaic=False).data)
+
+    # The default BioImage path must work too; it used to ask the degraded
+    # mosaic for tile positions it could never have.
+    image = bioio.BioImage(descriptor(acquisition))
+    assert image.data.shape == (1, 1, 1, 64, 64)
 
 
 def test_missing_plane_raises(tmp_path: pathlib.Path) -> None:

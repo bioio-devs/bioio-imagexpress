@@ -63,6 +63,8 @@ One `Reader` is one acquisition unit. A run root holds several; it raises
 
 Scenes are wells (`"B07"`), and a well's sites are mosaic tiles on `M`, giving
 `MTCZYX`. Pass `mosaic=False` for one scene per site (`"B07-s0"`, dims `TCZYX`).
+An acquisition whose manifest is missing carries no stage positions to place
+tiles with, so it falls back to per-site scenes with a warning.
 
 ```python
 img = BioImage("/path/to/experiment/Acquisition.jdce")

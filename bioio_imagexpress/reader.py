@@ -52,6 +52,9 @@ class Reader(BaseReader):
     mosaic: bool
         Treat each well as one scene, with its acquisition positions on the ``M``
         dimension. Turn it off for one scene per (well, position) and no ``M``.
+        Falls back to off, with a warning, when the tiles could not be stitched
+        anyway: placing them needs the manifest's stage positions and the
+        descriptor's pixel size.
         Default: True
 
     Raises
@@ -90,6 +93,13 @@ class Reader(BaseReader):
                 msg_extra="No readable planes were found in this acquisition.",
             )
 
+        if mosaic and not self._tiles_placeable():
+            log.warning(
+                "Stage positions or pixel size are missing, so tiles cannot be "
+                "stitched; reading one scene per acquisition position instead."
+            )
+            mosaic = False
+
         # Scene index -> (well, the acquisition positions it covers).
         self._mosaic = mosaic
         if mosaic:
@@ -101,11 +111,29 @@ class Reader(BaseReader):
                 (well, (site,)) for well, site in self._unit.scene_keys
             ]
 
-        # Per-scene pyramid shapes and dtype, probed on first use. Keyed by scene
-        # index because wells within one unit can differ in shape.
+        # Per-scene pyramid shapes, dtype and MetaSeries tags, probed from one
+        # plane on first use. Keyed by scene index because wells within one unit
+        # can differ in shape.
         self._scene_levels: Dict[int, Tuple[List[Tuple[int, ...]], np.dtype]] = {}
+        self._scene_metaseries: Dict[int, Optional[Dict[str, Any]]] = {}
 
         self._scenes: Optional[Tuple[str, ...]] = None
+
+    def _tiles_placeable(self) -> bool:
+        """Whether every multi-position well can be laid out as a mosaic."""
+        unit = self._unit
+        multi = [well for well in unit.wells if len(unit.sites(well)) > 1]
+        if not multi:
+            return True
+
+        if not (unit.jdce.pixel_size_x and unit.jdce.pixel_size_y):
+            return False
+
+        return all(
+            None not in unit.positions.get((well, site), (None, None))
+            for well in multi
+            for site in unit.sites(well)
+        )
 
     @staticmethod
     def _is_supported_image(fs: AbstractFileSystem, path: str, **kwargs: Any) -> bool:
@@ -239,13 +267,13 @@ class Reader(BaseReader):
 
     @property
     def row(self) -> Optional[str]:
-        """Plate row letter of the current scene, e.g. ``"B"``."""
-        return self._current()[0][0]
+        """Plate row letters of the current scene, e.g. ``"B"``."""
+        return acquisition.split_well(self._current()[0])[0]
 
     @property
     def column(self) -> Optional[str]:
         """Plate column of the current scene, unpadded, e.g. ``"7"``."""
-        return str(int(self._current()[0][1:]))
+        return str(acquisition.split_well(self._current()[0])[1])
 
     @property
     def position_index(self) -> Optional[int]:
@@ -274,12 +302,11 @@ class Reader(BaseReader):
         if self._unit.jdce.acquired_at is not None:
             return self._unit.jdce.acquired_at
 
-        if not self._unit.timestamps:
+        first = self._unit.first_timestamp
+        if first is None:
             return None
 
-        return datetime.fromtimestamp(
-            min(self._unit.timestamps.values()), tz=timezone.utc
-        )
+        return datetime.fromtimestamp(first, tz=timezone.utc)
 
     @property
     def stage_position(self) -> Tuple[Optional[float], Optional[float]]:
@@ -467,24 +494,63 @@ class Reader(BaseReader):
         return [(well, site) for site in sites]
 
     def _levels(self) -> Tuple[List[Tuple[int, ...]], np.dtype]:
-        """The current scene's pyramid shapes and dtype, from its first plane."""
+        """
+        The current scene's pyramid shapes and dtype, probed from one plane.
+
+        A plane that cannot be opened must not take the whole scene's metadata
+        with it, so the probe moves on to the next plane; its own pixels still
+        raise when they are asked for.
+        """
         scene_index = self._current_scene_index
         if scene_index not in self._scene_levels:
-            well, sites = self._current()
-            planes = self._unit.planes[(well, sites[0])]
-
-            with self._fs.open(planes[min(planes)], "rb") as handle:
-                with tifffile.TiffFile(handle) as tiff:
-                    series = tiff.series[0]
-                    self._scene_levels[scene_index] = (
-                        [tuple(level.shape) for level in series.levels],
-                        np.dtype(series.dtype),
-                    )
+            error: Optional[Exception] = None
+            for path in self._plane_paths():
+                try:
+                    with self._fs.open(path, "rb") as handle:
+                        with tifffile.TiffFile(handle) as tiff:
+                            series = tiff.series[0]
+                            self._scene_levels[scene_index] = (
+                                [tuple(level.shape) for level in series.levels],
+                                np.dtype(series.dtype),
+                            )
+                            try:
+                                self._scene_metaseries[
+                                    scene_index
+                                ] = tiff.metaseries_metadata
+                            except Exception as exc:
+                                log.debug("Could not read MetaSeries tags: %s", exc)
+                                self._scene_metaseries[scene_index] = None
+                    break
+                except Exception as exc:
+                    error = exc
+                    log.warning("Could not probe %s: %s", path, exc)
+            else:
+                raise IOError(
+                    f"No plane of scene '{self.current_scene}' could be opened."
+                ) from error
 
         return self._scene_levels[scene_index]
 
+    def _plane_paths(self) -> List[str]:
+        """Every plane path of the current scene, in index order."""
+        return [
+            self._unit.planes[key][plane]
+            for key in self._current_keys()
+            for plane in sorted(self._unit.planes[key])
+        ]
+
     def _level(self) -> int:
-        return min(self._current_resolution_level, len(self._levels()[0]) - 1)
+        level = self._current_resolution_level
+        available = len(self._levels()[0])
+        if level >= available:
+            # set_resolution_level validated against another scene's pyramid.
+            raise IndexError(
+                f"Scene '{self.current_scene}' has {available} resolution levels; "
+                f"level {level} was set. Call set_resolution_level to pick one of "
+                "this scene's levels."
+            )
+
+        return level
 
     def _level_scale(self) -> float:
         """Linear downsample factor of the current level relative to level 0."""
@@ -533,11 +599,12 @@ class Reader(BaseReader):
         positions = [self._unit.positions.get((well, s), (None, None)) for s in sites]
         origin_x, origin_y = positions[0]
 
+        row, column = acquisition.split_well(well)
         metadata: Dict[str, Any] = {
             "jdce": self._unit.jdce.raw,
             "well": well,
-            "row": well[0],
-            "column": int(well[1:]),
+            "row": row,
+            "column": column,
             "sites": list(sites),
             "stage_position_um": {"x": origin_x, "y": origin_y},
             "tile_stage_positions_um": [
@@ -545,13 +612,10 @@ class Reader(BaseReader):
             ],
         }
 
-        planes = self._unit.planes[(well, sites[0])]
-        try:
-            with self._fs.open(planes[min(planes)], "rb") as handle:
-                with tifffile.TiffFile(handle) as tiff:
-                    metadata["metaseries"] = tiff.metaseries_metadata
-        except Exception as exc:
-            log.debug("Could not read MetaSeries tags: %s", exc)
+        self._levels()  # The probe that fills the MetaSeries cache.
+        metaseries = self._scene_metaseries.get(self._current_scene_index)
+        if metaseries is not None:
+            metadata["metaseries"] = metaseries
 
         return metadata
 
@@ -581,5 +645,12 @@ def _read_plane(fs: AbstractFileSystem, path: Optional[str], level: int) -> np.n
     with fs.open(path, "rb") as handle:
         with tifffile.TiffFile(handle) as tiff:
             series = tiff.series[0]
+            if level >= len(series.levels):
+                # Quietly returning another level would hand the dask graph a
+                # chunk of the wrong shape, and it does not check.
+                raise IndexError(
+                    f"{path} has {len(series.levels)} resolution levels; "
+                    f"level {level} was requested."
+                )
 
-            return series.levels[min(level, len(series.levels) - 1)].asarray()
+            return series.levels[level].asarray()

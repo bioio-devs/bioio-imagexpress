@@ -37,6 +37,11 @@ def build_unit(directory: pathlib.Path) -> acquisition.AcquisitionUnit:
             "4X_Lumenoid_Cellvis_96_8-7-2026_t0_B03_s1_w0_z0.tif",
             acquisition.PlaneName(t=0, well="B03", site=1, channel=0, z=0),
         ),
+        (
+            # A 1536-well plate's two letter row.
+            "Scan_t0_AA01_s0_w0_z0.tif",
+            acquisition.PlaneName(t=0, well="AA01", site=0, channel=0, z=0),
+        ),
         ("Thumbs.db", None),
         ("Wellscan_96well_TL_488_t0_B07_s0_w0_z0.tif.statistics.json", None),
         ("focus_report.txt", None),
@@ -55,6 +60,7 @@ def test_parse_plane_name(name: str, expected: Optional[acquisition.PlaneName]) 
         ("B07", "B07"),
         ("b7", "B07"),
         ("B-7", "B07"),
+        ("AA - 1", "AA01"),
         ("", None),
         ("12", None),
         ("Well", None),
@@ -70,7 +76,7 @@ def test_normalize_well(value: str, expected: Optional[str]) -> None:
         (
             Z_STACK,
             {
-                "channel_names": ["TL", "FITC"],
+                "channel_names": {0: "TL", 1: "FITC"},
                 "pixel_size_x": 0.5817,
                 "pixel_size_y": 0.5817,
                 "z_step": 3.0,
@@ -84,7 +90,7 @@ def test_normalize_well(value: str, expected: Optional[str]) -> None:
         (
             EXPERIMENT,
             {
-                "channel_names": ["TL"],
+                "channel_names": {0: "TL"},
                 "pixel_size_x": 1.6595,
                 "pixel_size_y": 1.6595,
                 # The descriptor records ZStep 0.0, which is no Z spacing at all.
@@ -132,10 +138,13 @@ def test_read_manifest_drops_incomplete_rows() -> None:
         "B - 2,,0,0,0,timepoint0,no_field.tif\n"
         "notawell,1,0,0,0,timepoint0,bad_well.tif\n"
         "B - 2,1,0,0,0,timepoint0,\n"
+        "B - 2,1,0,0,0,timepoint0\\zstep0,windows.tif\n"
     )
     rows = acquisition.read_manifest(contents)
 
-    assert [row.filename for row in rows] == ["good.tif"]
+    assert [row.filename for row in rows] == ["good.tif", "windows.tif"]
+    # The instrument writes Windows separators; paths are composed as posix.
+    assert rows[1].subfolder == "timepoint0/zstep0"
 
 
 @pytest.mark.parametrize(

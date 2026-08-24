@@ -21,16 +21,20 @@ JDCE_EXTENSION = ".jdce"
 TIMEPOINT_DIR_PREFIX = "timepoint"
 
 # <Project>_t<T>_<Well>_s<Site>_w<Channel>_z<Z>.tif, all indices zero-based.
+# Rows run A-Z then AA-AF, so a 1536-well plate has two-letter rows.
 FILENAME_RE = re.compile(
     r"^(?P<prefix>.+)"
     r"_t(?P<t>\d+)"
-    r"_(?P<well>[A-Z]\d{2})"
+    r"_(?P<well>[A-Z]{1,2}\d{2})"
     r"_s(?P<site>\d+)"
     r"_w(?P<channel>\d+)"
     r"_z(?P<z>\d+)"
     r"\.tiff?$",
     re.IGNORECASE,
 )
+
+# A normalized well label: row letters then an unpadded-or-padded column.
+WELL_RE = re.compile(r"^([A-Z]{1,2})(\d+)$")
 
 # (well, site) -- one acquisition position.
 SceneKey = Tuple[str, int]
@@ -93,11 +97,34 @@ def normalize_well(value: str) -> Optional[str]:
     well: Optional[str]
         The normalized label, or None if the value is not a well.
     """
-    match = re.match(r"^([A-Za-z])-?(\d{1,2})$", (value or "").strip().replace(" ", ""))
+    match = re.match(
+        r"^([A-Za-z]{1,2})-?(\d{1,2})$", (value or "").strip().replace(" ", "")
+    )
     if match is None:
         return None
 
     return f"{match.group(1).upper()}{int(match.group(2)):02d}"
+
+
+def split_well(well: str) -> Tuple[str, int]:
+    """
+    Split a normalized well label into its plate coordinates.
+
+    Parameters
+    ----------
+    well: str
+        A label as ``normalize_well`` or ``parse_plane_name`` produce it.
+
+    Returns
+    -------
+    coordinates: Tuple[str, int]
+        The row letters and the column number, e.g. ``("AA", 1)`` for ``"AA01"``.
+    """
+    match = WELL_RE.match(well)
+    if match is None:
+        raise ValueError(f"Not a well label: {well!r}")
+
+    return match.group(1), int(match.group(2))
 
 
 ###############################################################################
@@ -108,7 +135,7 @@ class JdceMetadata:
     """The subset of the ``.jdce`` descriptor this reader consumes."""
 
     raw: Dict[str, Any] = field(default_factory=dict)
-    channel_names: List[str] = field(default_factory=list)
+    channel_names: Dict[int, str] = field(default_factory=dict)
     pixel_size_x: Optional[float] = None
     pixel_size_y: Optional[float] = None
     z_step: Optional[float] = None
@@ -139,19 +166,25 @@ def parse_jdce(contents: str) -> JdceMetadata:
     protocol = stack.get("AutoLeadAcquisitionProtocol", {})
     calibration = protocol.get("ObjectiveCalibration", {})
 
-    # Keep the descriptor's own ordering by Index rather than list position.
+    # Names are keyed by the descriptor's own Index, which is what the plane
+    # filenames' _w<N> and the manifest's Wavelength column refer to. List
+    # position stands in only when a wavelength carries no Index.
     wavelengths = sorted(
-        protocol.get("Wavelengths", []) or [], key=lambda w: w.get("Index", 0)
+        protocol.get("Wavelengths", []) or [],
+        key=lambda w: _as_int(w.get("Index")) or 0,
     )
-    channel_names = [
-        (w.get("EmissionFilter") or {}).get("Name") or f"Channel:{i}"
-        for i, w in enumerate(wavelengths)
-    ]
+    channel_names: Dict[int, str] = {}
+    for position, wavelength in enumerate(wavelengths):
+        name = (wavelength.get("EmissionFilter") or {}).get("Name")
+        index = _as_int(wavelength.get("Index"))
+        if name:
+            channel_names.setdefault(index if index is not None else position, name)
 
     # Z spacing lives only here: the manifest's PositionZUm is absolute stage Z
-    # and the TIFF resolution tags are unset.
+    # and the TIFF resolution tags are unset. 0.0 and unparseable values are
+    # both "no spacing"; keep scanning past them.
     z_step = next(
-        (_as_float(w.get("ZStep")) for w in wavelengths if w.get("ZStep")), None
+        (v for v in (_as_float(w.get("ZStep")) for w in wavelengths) if v), None
     )
     if not z_step:
         z_params = protocol.get("PlateMap", {}).get("ZDimensionParameters", {})
@@ -177,7 +210,9 @@ def parse_jdce(contents: str) -> JdceMetadata:
         acquired_at=_parse_creation(stack.get("Creation", {})),
         # The descriptor names its own manifests, which is what lets a unit be
         # indexed without listing a single directory.
-        metadata_files=[str(n) for n in (stack.get("ImageMetadataFiles") or []) if n],
+        metadata_files=[
+            _as_relpath(str(n)) for n in (stack.get("ImageMetadataFiles") or []) if n
+        ],
     )
 
 
@@ -208,6 +243,11 @@ def _as_int(value: Any) -> Optional[int]:
         return int(float(value))
     except (TypeError, ValueError):
         return None
+
+
+def _as_relpath(value: str) -> str:
+    # The instrument runs Windows, so its path fields may arrive backslashed.
+    return value.strip().replace("\\", "/").strip("/")
 
 
 ###############################################################################
@@ -265,9 +305,9 @@ def read_manifest(contents: str) -> List[ManifestRow]:
                 channel=int(channel),  # type: ignore[arg-type]
                 t=int(t),  # type: ignore[arg-type]
                 z=int(z),  # type: ignore[arg-type]
-                subfolder=(record.get("ImageSubFolderPath") or "").strip()
+                subfolder=_as_relpath(record.get("ImageSubFolderPath") or "")
                 or f"{TIMEPOINT_DIR_PREFIX}{t}",
-                filename=filename,
+                filename=_as_relpath(filename),
                 timestamp_s=_as_float(record.get("TimeStampSec")),
                 position_x_um=_as_float(record.get("PositionXUm")),
                 position_y_um=_as_float(record.get("PositionYUm")),
@@ -287,7 +327,7 @@ class AcquisitionUnit:
     path: str
     jdce: JdceMetadata
     planes: Dict[SceneKey, Dict[PlaneKey, str]] = field(default_factory=dict)
-    timestamps: Dict[int, float] = field(default_factory=dict)
+    timestamps: Dict[SceneKey, Dict[int, float]] = field(default_factory=dict)
     positions: Dict[SceneKey, Tuple[Optional[float], Optional[float]]] = field(
         default_factory=dict
     )
@@ -295,7 +335,13 @@ class AcquisitionUnit:
     @property
     def scene_keys(self) -> List[SceneKey]:
         """Every (well, site) present, ordered by plate row, column, then site."""
-        return sorted(self.planes, key=lambda key: (key[0][0], int(key[0][1:]), key[1]))
+
+        def order(key: SceneKey) -> Tuple[int, str, int, int]:
+            row, column = split_well(key[0])
+            # Single-letter rows precede the double-letter rows below them.
+            return len(row), row, column, key[1]
+
+        return sorted(self.planes, key=order)
 
     @property
     def wells(self) -> List[str]:
@@ -332,26 +378,39 @@ class AcquisitionUnit:
         _, channels, _ = self.extents(keys)
         names = self.jdce.channel_names
 
-        return [
-            names[channel] if channel < len(names) else f"Channel:{channel}"
-            for channel in channels
-        ]
+        return [names.get(channel, f"Channel:{channel}") for channel in channels]
 
     def time_coords(self, keys: Sequence[SceneKey]) -> Optional[List[float]]:
         """
-        Elapsed seconds from the start of the acquisition, or None if unknown.
+        Elapsed seconds from the first time point of the scene ``keys`` span.
 
-        Measured from the manifest's timestamps. The descriptor's
-        ``TimeSchedule.Times[].Ms`` values are time point indices rather than
-        milliseconds, so they are deliberately not used.
+        Measured from the manifest's timestamps for these keys alone, because
+        wells are imaged in sequence and another well's clock says nothing about
+        this one. The descriptor's ``TimeSchedule.Times[].Ms`` values are time
+        point indices rather than milliseconds, so they are deliberately not used.
         """
+        stamps: Dict[int, float] = {}
+        for key in keys:
+            for t, seconds in self.timestamps.get(key, {}).items():
+                if t not in stamps or seconds < stamps[t]:
+                    stamps[t] = seconds
+
         timepoints, _, _ = self.extents(keys)
-        if not all(t in self.timestamps for t in timepoints):
+        if not all(t in stamps for t in timepoints):
             return None
 
-        origin = min(self.timestamps.values())
+        origin = min(stamps.values())
 
-        return [self.timestamps[t] - origin for t in timepoints]
+        return [stamps[t] - origin for t in timepoints]
+
+    @property
+    def first_timestamp(self) -> Optional[float]:
+        """The acquisition's earliest manifest timestamp, or None without one."""
+        stamps = [
+            s for per_scene in self.timestamps.values() for s in per_scene.values()
+        ]
+
+        return min(stamps) if stamps else None
 
 
 ###############################################################################
@@ -385,6 +444,14 @@ def discover_unit(
 
     descriptors = find_descriptors(fs, path)
     if descriptors and find_timepoint_dirs(fs, path):
+        if len(descriptors) > 1:
+            log.warning(
+                "%s holds %d descriptors; reading %s. Name a descriptor directly "
+                "to read another.",
+                path,
+                len(descriptors),
+                descriptors[0],
+            )
         return path, descriptors[0]
 
     return None
@@ -499,10 +566,12 @@ def _index_from_manifest(unit: AcquisitionUnit, rows: List[ManifestRow]) -> None
         )
 
         if row.timestamp_s is not None:
-            # The first plane of a time point stands in for the whole time point.
-            recorded = unit.timestamps.get(row.t)
+            # The scene's first plane of a time point stands in for the whole
+            # time point; other scenes were imaged at other times.
+            stamps = unit.timestamps.setdefault(scene, {})
+            recorded = stamps.get(row.t)
             if recorded is None or row.timestamp_s < recorded:
-                unit.timestamps[row.t] = row.timestamp_s
+                stamps[row.t] = row.timestamp_s
 
         if scene not in unit.positions and row.position_x_um is not None:
             unit.positions[scene] = (row.position_x_um, row.position_y_um)
