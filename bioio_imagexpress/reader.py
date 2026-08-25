@@ -105,7 +105,6 @@ class Reader(BaseReader):
             )
             reconstruct_mosaic = False
 
-        # Scene index -> (well, the acquisition positions it covers).
         self._mosaic = reconstruct_mosaic
         if reconstruct_mosaic:
             self._scene_table = [
@@ -117,8 +116,7 @@ class Reader(BaseReader):
                 (well, (site,)) for well, site in self._acquisition.scene_keys
             ]
 
-        # The current scene's (level_shapes, dtype, metaseries), read lazily
-        # from one plane and reset on scene change by _reset_self.
+        # The current scene's (level_shapes, dtype, metaseries)
         self._plane_metadata: Optional[
             Tuple[List[Tuple[int, ...]], np.dtype, Optional[Dict[str, Any]]]
         ] = None
@@ -186,7 +184,6 @@ class Reader(BaseReader):
         data: np.ndarray
             The indexed image data in native (reduced) dimension order.
         """
-        # Dask does not support fancy indexing on more than one axis at a time.
         if sum(isinstance(spec, (list, tuple)) for spec in dim_specs) > 1:
             return super()._read_indexed(given_dims, dim_specs)
 
@@ -245,10 +242,8 @@ class Reader(BaseReader):
         Returns
         -------
         sizes: PhysicalPixelSizes
-            The floats representing physical pixel sizes in micrometers for
-            dimensions Z, Y and X, from the ``.jdce`` descriptor. Y and X are
-            scaled to the current resolution level, which is read off a plane, so
-            this opens one TIFF the first time a scene is asked about.
+            Using available metadata, the floats representing physical pixel sizes for
+            dimensions Z, Y, and X.
         """
         scale = self._level_scale()
         pixel_y = self._acquisition.jdce.pixel_size_y
@@ -284,10 +279,6 @@ class Reader(BaseReader):
     def position_index(self) -> Optional[int]:
         """
         The current scene's acquisition position within its well.
-
-        None with ``reconstruct_mosaic=True``, where a scene is a whole well
-        rather than one
-        of its positions.
         """
         return None if self._mosaic else self._current()[1][0]
 
@@ -300,10 +291,6 @@ class Reader(BaseReader):
     def imaging_datetime(self) -> Optional[datetime]:
         """
         When the acquisition began.
-
-        The descriptor's ``Creation`` stamp, which is naive instrument local
-        time. Falls back to the manifest's first timestamp, which is a Unix epoch
-        and so returns a UTC-aware datetime instead.
         """
         if self._acquisition.jdce.acquired_at is not None:
             return self._acquisition.jdce.acquired_at
@@ -401,10 +388,13 @@ class Reader(BaseReader):
 
     def get_mosaic_tile_positions(self, **kwargs: int) -> List[Tuple[int, int]]:
         """
+        The top-left pixel of every tile in the current scene, in ``M`` order,
+        at the current resolution level.
+
         Returns
         -------
         positions: List[Tuple[int, int]]
-            The top-left pixel of every tile in the current scene, in ``M`` order.
+            Each tile's (top, left).
 
         Raises
         ------
@@ -413,27 +403,11 @@ class Reader(BaseReader):
         ValueError
             The manifest carries no stage positions to place the tiles from.
         """
-        if DimensionNames.MosaicTile not in self.dims.order:
+        if not self._mosaic:
             raise exceptions.UnexpectedShapeError(
                 "Cannot compute tile positions for an image without tiles."
             )
 
-        return self._tile_positions()
-
-    def _get_stitched_dask_mosaic(self) -> xr.DataArray:
-        return self._stitch(self.xarray_dask_data)
-
-    def _get_stitched_mosaic(self) -> xr.DataArray:
-        return self._stitch(self.xarray_data)
-
-    def _tile_positions(self) -> List[Tuple[int, int]]:
-        """
-        Tile origins in pixels at the current resolution level.
-
-        Placed from the manifest's stage coordinates, scaled by the descriptor's
-        pixel size and referenced to the top-left-most tile. Both axes run the
-        same way as the image: a larger stage Y is further down.
-        """
         well, sites = self._current()
         if len(sites) == 1:
             return [(0, 0)]
@@ -464,9 +438,15 @@ class Reader(BaseReader):
             for x, y in positions
         ]
 
+    def _get_stitched_dask_mosaic(self) -> xr.DataArray:
+        return self._stitch(self.xarray_dask_data)
+
+    def _get_stitched_mosaic(self) -> xr.DataArray:
+        return self._stitch(self.xarray_data)
+
     def _stitch(self, tiles: xr.DataArray) -> xr.DataArray:
-        """Lay the tiles into one TCZYX array, resolving overlap last tile wins."""
-        positions = self._tile_positions()
+        """Stitch into one TCZYX array, resolving overlap last tile wins."""
+        positions = self.get_mosaic_tile_positions()
         tile_y, tile_x = tiles.shape[-2:]
         height = max(top for top, _ in positions) + tile_y
         width = max(left for _, left in positions) + tile_x
@@ -525,7 +505,7 @@ class Reader(BaseReader):
 
     @property
     def _metaseries(self) -> Optional[Dict[str, Any]]:
-        """MetaSeries tags of the current scene's planes, when readable."""
+        """MetaSeries tags of the current scene's planes."""
         if self._plane_metadata is None:
             self._plane_metadata = self._read_plane_metadata()
 
@@ -537,10 +517,6 @@ class Reader(BaseReader):
         """
         Read the current scene's pyramid shapes, dtype and MetaSeries tags off
         one plane.
-
-        A plane that cannot be opened must not take the whole scene's metadata
-        with it, so the read moves on to the next plane; its own pixels still
-        raise when they are asked for.
         """
         paths = [
             self._acquisition.planes[key][plane]
@@ -576,7 +552,6 @@ class Reader(BaseReader):
         level = self._current_resolution_level
         available = len(self._level_shapes)
         if level >= available:
-            # set_resolution_level validated against another scene's pyramid.
             raise IndexError(
                 f"Scene '{self.current_scene}' has {available} resolution levels; "
                 f"level {level} was set. Call set_resolution_level to pick one of "
@@ -661,8 +636,6 @@ def _read_plane(fs: AbstractFileSystem, path: Optional[str], level: int) -> np.n
         with tifffile.TiffFile(handle) as tiff:
             series = tiff.series[0]
             if level >= len(series.levels):
-                # Quietly returning another level would hand the dask graph a
-                # chunk of the wrong shape, and it does not check.
                 raise IndexError(
                     f"{path} has {len(series.levels)} resolution levels; "
                     f"level {level} was requested."
