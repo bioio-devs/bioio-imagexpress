@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 import csv
 import io
 import json
@@ -20,8 +17,7 @@ log = logging.getLogger(__name__)
 JDCE_EXTENSION = ".jdce"
 TIMEPOINT_DIR_PREFIX = "timepoint"
 
-# A normalized well label: row letters then a column number. Rows run A-Z then
-# AA-AF, so a 1536-well plate has two-letter rows.
+# A normalized well label
 WELL_RE = re.compile(r"^([A-Z]{1,2})(\d+)$")
 
 # (well, site) -- one acquisition position.
@@ -55,7 +51,7 @@ def normalize_well(value: str) -> Optional[str]:
     return f"{match.group(1).upper()}{int(match.group(2)):02d}"
 
 
-def split_well(well: str) -> Tuple[str, int]:
+def well_to_row_column(well: str) -> Tuple[str, int]:
     """
     Split a normalized well label into its plate coordinates.
 
@@ -107,8 +103,7 @@ def parse_jdce(contents: str) -> JdceMetadata:
     Returns
     -------
     metadata: JdceMetadata
-        Every field is optional; a sparse descriptor yields Nones rather than
-        raising, so the read can fall back to the manifest.
+        acquisition parameters out of a ``.jdce`` descriptor. Every field is optional.
     """
     raw = json.loads(contents)
     stack = raw.get("ImageStack", {})
@@ -273,7 +268,7 @@ class Acquisition:
         """Every (well, site) present, ordered by plate row, column, then site."""
 
         def order(key: SceneKey) -> Tuple[int, str, int, int]:
-            row, column = split_well(key[0])
+            row, column = well_to_row_column(key[0])
             # Single-letter rows precede the double-letter rows below them.
             return len(row), row, column, key[1]
 
@@ -376,10 +371,20 @@ def discover_acquisition(
     path = path.rstrip("/")
 
     if path.lower().endswith(JDCE_EXTENSION):
-        return (posixpath.dirname(path), path) if _exists(fs, path) else None
+        try:
+            found = bool(fs.exists(path))
+        except Exception:
+            found = False
+        return (posixpath.dirname(path), path) if found else None
 
-    descriptors = find_descriptors(fs, path)
-    if descriptors and find_timepoint_dirs(fs, path):
+    names = _names_in(fs, path)
+    descriptors = sorted(
+        posixpath.join(path, name)
+        for name in names
+        if name.lower().endswith(JDCE_EXTENSION)
+    )
+    timepoints = any(name.lower().startswith(TIMEPOINT_DIR_PREFIX) for name in names)
+    if descriptors and timepoints:
         if len(descriptors) > 1:
             log.warning(
                 "%s holds %d descriptors; reading %s. Name a descriptor directly "
@@ -417,74 +422,43 @@ def index_acquisition(
         which planes exist: an acquisition whose manifests cannot be read indexes no
         planes, which the reader refuses.
     """
-    acq = Acquisition(path=path, jdce=_read_jdce(fs, descriptor))
+    try:
+        with fs.open(descriptor, "r", encoding="utf-8-sig") as handle:
+            jdce = parse_jdce(handle.read())
+    except Exception as exc:
+        # A malformed descriptor costs pixel sizes and channel names, not the read.
+        log.warning("Could not parse descriptor %s: %s", descriptor, exc)
+        jdce = JdceMetadata()
+
+    # The descriptor names its own manifests; only fall back to listing when it
+    # does not, or could not be read.
+    if jdce.metadata_files:
+        manifests = [posixpath.join(path, name) for name in jdce.metadata_files]
+    else:
+        manifests = sorted(
+            posixpath.join(path, name)
+            for name in _names_in(fs, path)
+            if name.lower().startswith("image_metadata_")
+            and name.lower().endswith(".csv")
+        )
 
     rows: List[ManifestRow] = []
-    for manifest in _manifest_paths(fs, path, acq.jdce):
+    for manifest in manifests:
         try:
             with fs.open(manifest, "r", encoding="utf-8-sig") as handle:
                 rows.extend(read_manifest(handle.read()))
         except Exception as exc:
             log.warning("Could not read manifest %s: %s", manifest, exc)
 
-    _index_from_manifest(acq, rows)
+    acq = Acquisition(path=path, jdce=jdce)
 
-    return acq
-
-
-def find_descriptors(fs: AbstractFileSystem, path: str) -> List[str]:
-    """The ``.jdce`` files directly inside ``path``, sorted for determinism."""
-    return sorted(
-        posixpath.join(path, name)
-        for name in _names_in(fs, path)
-        if name.lower().endswith(JDCE_EXTENSION)
-    )
-
-
-def find_timepoint_dirs(fs: AbstractFileSystem, path: str) -> List[str]:
-    """The ``timepoint<N>`` directories inside ``path``, ordered by N."""
-    found = []
-    for name in _names_in(fs, path):
-        if not name.lower().startswith(TIMEPOINT_DIR_PREFIX):
-            continue
-        index = _as_int(name[len(TIMEPOINT_DIR_PREFIX) :])
-        if index is not None:
-            found.append((index, posixpath.join(path, name)))
-
-    return [path for _, path in sorted(found)]
-
-
-def _manifest_paths(fs: AbstractFileSystem, path: str, jdce: JdceMetadata) -> List[str]:
-    # The descriptor names its own manifests; only fall back to listing when it
-    # does not, or could not be read.
-    if jdce.metadata_files:
-        return [posixpath.join(path, name) for name in jdce.metadata_files]
-
-    return sorted(
-        posixpath.join(path, name)
-        for name in _names_in(fs, path)
-        if name.lower().startswith("image_metadata_") and name.lower().endswith(".csv")
-    )
-
-
-def _read_jdce(fs: AbstractFileSystem, descriptor: str) -> JdceMetadata:
-    try:
-        with fs.open(descriptor, "r", encoding="utf-8-sig") as handle:
-            return parse_jdce(handle.read())
-    except Exception as exc:
-        # A malformed descriptor costs pixel sizes and channel names, not the read.
-        log.warning("Could not parse descriptor %s: %s", descriptor, exc)
-        return JdceMetadata()
-
-
-def _index_from_manifest(acq: Acquisition, rows: List[ManifestRow]) -> None:
     # Plane paths are composed rather than confirmed; a row naming a file that
     # was never written surfaces as a read error when that plane is asked for.
     for row in rows:
         scene: SceneKey = (row.well, row.site)
         acq.planes.setdefault(scene, {}).setdefault(
             (row.t, row.channel, row.z),
-            posixpath.join(acq.path, row.subfolder, row.filename),
+            posixpath.join(path, row.subfolder, row.filename),
         )
 
         if row.timestamp_s is not None:
@@ -498,6 +472,8 @@ def _index_from_manifest(acq: Acquisition, rows: List[ManifestRow]) -> None:
         if scene not in acq.positions and row.position_x_um is not None:
             acq.positions[scene] = (row.position_x_um, row.position_y_um)
 
+    return acq
+
 
 def _names_in(fs: AbstractFileSystem, path: str) -> List[str]:
     # "Cannot list" is a supported state here rather than a failure, and backends
@@ -507,10 +483,3 @@ def _names_in(fs: AbstractFileSystem, path: str) -> List[str]:
     except Exception as exc:
         log.debug("Could not list %s: %s", path, exc)
         return []
-
-
-def _exists(fs: AbstractFileSystem, path: str) -> bool:
-    try:
-        return bool(fs.exists(path))
-    except Exception:
-        return False

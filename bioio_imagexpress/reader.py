@@ -268,12 +268,12 @@ class Reader(BaseReader):
     @property
     def row(self) -> Optional[str]:
         """Plate row letters of the current scene, e.g. ``"B"``."""
-        return acquisition.split_well(self._current()[0])[0]
+        return acquisition.well_to_row_column(self._current()[0])[0]
 
     @property
     def column(self) -> Optional[str]:
         """Plate column of the current scene, unpadded, e.g. ``"7"``."""
-        return str(acquisition.split_well(self._current()[0])[1])
+        return str(acquisition.well_to_row_column(self._current()[0])[1])
 
     @property
     def position_index(self) -> Optional[int]:
@@ -606,7 +606,7 @@ class Reader(BaseReader):
         ]
         origin_x, origin_y = positions[0]
 
-        row, column = acquisition.split_well(well)
+        row, column = acquisition.well_to_row_column(well)
         metadata: Dict[str, Any] = {
             "jdce": self._acquisition.jdce.raw,
             "well": well,
