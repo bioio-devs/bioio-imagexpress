@@ -157,7 +157,7 @@ def parse_jdce(contents: str) -> JdceMetadata:
             or None
         ),
         acquired_at=_parse_creation(stack.get("Creation", {})),
-        # The descriptor names its own manifests, which is what lets a unit be
+        # The descriptor names its own manifests, which is what lets an acquisition be
         # indexed without listing a single directory.
         metadata_files=[
             _as_relpath(str(n)) for n in (stack.get("ImageMetadataFiles") or []) if n
@@ -271,7 +271,7 @@ def read_manifest(contents: str) -> List[ManifestRow]:
 
 
 @dataclass
-class AcquisitionUnit:
+class Acquisition:
     """One acquisition: its descriptor, its plane index, and its stage metadata."""
 
     path: str
@@ -366,11 +366,11 @@ class AcquisitionUnit:
 ###############################################################################
 
 
-def discover_unit(
+def discover_acquisition(
     fs: AbstractFileSystem, path: str
 ) -> Optional[Tuple[str, Optional[str]]]:
     """
-    Resolve a user-supplied path to a single acquisition unit.
+    Resolve a user-supplied path to a single acquisition.
 
     Parameters
     ----------
@@ -381,8 +381,8 @@ def discover_unit(
 
     Returns
     -------
-    unit: Optional[Tuple[str, Optional[str]]]
-        The unit's directory and its descriptor, or None if the path is not an
+    acquisition: Optional[Tuple[str, Optional[str]]]
+        The acquisition's directory and its descriptor, or None if the path is not an
         acquisition. Naming the descriptor is accepted on its existence alone,
         without the ``timepoint<N>`` check the directory form makes, because that
         check costs a directory listing.
@@ -407,52 +407,43 @@ def discover_unit(
     return None
 
 
-def find_sub_units(fs: AbstractFileSystem, path: str) -> List[str]:
-    """The names of any acquisition units one level below ``path``."""
-    return [
-        name
-        for name in sorted(_names_in(fs, path))
-        if discover_unit(fs, posixpath.join(path, name)) is not None
-    ]
-
-
-def build_unit(
+def index_acquisition(
     fs: AbstractFileSystem, path: str, descriptor: Optional[str]
-) -> AcquisitionUnit:
+) -> Acquisition:
     """
-    Index one acquisition unit, opening no TIFF.
+    Index one acquisition, opening no TIFF.
 
     Parameters
     ----------
     fs: AbstractFileSystem
-        The filesystem the unit lives on.
+        The filesystem the acquisition lives on.
     path: str
-        The unit's directory.
+        The acquisition's directory.
     descriptor: Optional[str]
-        The unit's ``.jdce`` file.
+        The acquisition's ``.jdce`` file.
 
     Returns
     -------
-    unit: AcquisitionUnit
+    acquisition: Acquisition
         Indexed from the ``image_metadata_*.csv`` manifests, which name every
-        plane's subfolder and filename, so the whole unit resolves without
+        plane's subfolder and filename, so the whole acquisition resolves without
         listing a directory. The manifests are the one source of truth for
-        which planes exist: a unit whose manifests cannot be read indexes no
+        which planes exist: an acquisition whose manifests cannot be read indexes no
         planes, which the reader refuses.
     """
-    unit = AcquisitionUnit(path=path, jdce=_read_jdce(fs, descriptor))
+    acq = Acquisition(path=path, jdce=_read_jdce(fs, descriptor))
 
     rows: List[ManifestRow] = []
-    for manifest in _manifest_paths(fs, path, unit.jdce):
+    for manifest in _manifest_paths(fs, path, acq.jdce):
         try:
             with fs.open(manifest, "r", encoding="utf-8-sig") as handle:
                 rows.extend(read_manifest(handle.read()))
         except Exception as exc:
             log.warning("Could not read manifest %s: %s", manifest, exc)
 
-    _index_from_manifest(unit, rows)
+    _index_from_manifest(acq, rows)
 
-    return unit
+    return acq
 
 
 def find_descriptors(fs: AbstractFileSystem, path: str) -> List[str]:
@@ -503,26 +494,26 @@ def _read_jdce(fs: AbstractFileSystem, descriptor: Optional[str]) -> JdceMetadat
         return JdceMetadata()
 
 
-def _index_from_manifest(unit: AcquisitionUnit, rows: List[ManifestRow]) -> None:
+def _index_from_manifest(acq: Acquisition, rows: List[ManifestRow]) -> None:
     # Plane paths are composed rather than confirmed; a row naming a file that
     # was never written surfaces as a read error when that plane is asked for.
     for row in rows:
         scene: SceneKey = (row.well, row.site)
-        unit.planes.setdefault(scene, {}).setdefault(
+        acq.planes.setdefault(scene, {}).setdefault(
             (row.t, row.channel, row.z),
-            posixpath.join(unit.path, row.subfolder, row.filename),
+            posixpath.join(acq.path, row.subfolder, row.filename),
         )
 
         if row.timestamp_s is not None:
             # The scene's first plane of a time point stands in for the whole
             # time point; other scenes were imaged at other times.
-            stamps = unit.timestamps.setdefault(scene, {})
+            stamps = acq.timestamps.setdefault(scene, {})
             recorded = stamps.get(row.t)
             if recorded is None or row.timestamp_s < recorded:
                 stamps[row.t] = row.timestamp_s
 
-        if scene not in unit.positions and row.position_x_um is not None:
-            unit.positions[scene] = (row.position_x_um, row.position_y_um)
+        if scene not in acq.positions and row.position_x_um is not None:
+            acq.positions[scene] = (row.position_x_um, row.position_y_um)
 
 
 def _names_in(fs: AbstractFileSystem, path: str) -> List[str]:

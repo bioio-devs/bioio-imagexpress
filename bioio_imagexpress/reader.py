@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 import logging
 from datetime import datetime, timedelta, timezone
 from itertools import product
@@ -39,8 +36,6 @@ class Reader(BaseReader):
     An acquisition is a directory rather than a single file: every plane is its
     own TIFF, and the structure tying them together lives in a ``.jdce``
     descriptor, an ``image_metadata_*.csv`` manifest, and the plane filenames.
-    One scene is assembled per well, with the well's acquisition positions as
-    mosaic tiles on ``M``.
 
     Parameters
     ----------
@@ -49,12 +44,13 @@ class Reader(BaseReader):
     fs_kwargs: Dict[str, Any]
         Any specific keyword arguments to pass down to the fsspec created filesystem.
         Default: {}
-    mosaic: bool
+    reconstruct_mosaic: bool
         Treat each well as one scene, with its acquisition positions on the ``M``
         dimension. Turn it off for one scene per (well, position) and no ``M``.
-        Falls back to off, with a warning, when the tiles could not be stitched
-        anyway: placing them needs the manifest's stage positions and the
-        descriptor's pixel size.
+        A well with a single position reads identically either way. Falls back
+        to off, with a warning, when the tiles could not be stitched anyway:
+        placing them needs the manifest's stage positions and the descriptor's
+        pixel size.
         Default: True
 
     Raises
@@ -71,77 +67,82 @@ class Reader(BaseReader):
         self,
         image: Any,
         fs_kwargs: Dict[str, Any] = {},
-        mosaic: bool = True,
+        reconstruct_mosaic: bool = True,
         **kwargs: Any,
     ):
         self._fs, self._path = io.pathlike_to_fs(
             image, enforce_exists=True, fs_kwargs=fs_kwargs
         )
 
-        discovered = acquisition.discover_unit(self._fs, self._path)
+        discovered = acquisition.discover_acquisition(self._fs, self._path)
         if discovered is None:
-            raise exceptions.UnsupportedFileFormatError(
-                self.__class__.__name__, self._path, msg_extra=self._why_unsupported()
-            )
-
-        # Manifest parsing only; no TIFF is opened until pixels are requested.
-        self._unit = acquisition.build_unit(self._fs, *discovered)
-        if not self._unit.planes:
             raise exceptions.UnsupportedFileFormatError(
                 self.__class__.__name__,
                 self._path,
                 msg_extra=(
-                    "No plane could be indexed from the acquisition's "
-                    "'image_metadata_*.csv' manifests, which are the reader's "
-                    "source of truth for which planes exist."
+                    "Expected an ImageXpress acquisition directory (a '.jdce' "
+                    "descriptor plus 'timepoint<N>' folders) or the '.jdce' "
+                    "file itself."
                 ),
             )
 
-        if mosaic and not self._tiles_placeable():
+        # Fetch Manifest
+        self._acquisition = acquisition.index_acquisition(self._fs, *discovered)
+        if not self._acquisition.planes:
+            raise exceptions.UnsupportedFileFormatError(
+                self.__class__.__name__,
+                self._path,
+                msg_extra=(
+                    "No planes could be indexed from the acquisition's "
+                    "'image_metadata_*.csv' manifest"
+                ),
+            )
+
+        if reconstruct_mosaic and not self._tiles_placeable():
             log.warning(
-                "Stage positions or pixel size are missing, so tiles cannot be "
+                "Stage positions or pixel size are missing. Tiles cannot be "
                 "stitched; reading one scene per acquisition position instead."
             )
-            mosaic = False
+            reconstruct_mosaic = False
 
         # Scene index -> (well, the acquisition positions it covers).
-        self._mosaic = mosaic
-        if mosaic:
+        self._mosaic = reconstruct_mosaic
+        if reconstruct_mosaic:
             self._scene_table = [
-                (well, tuple(self._unit.sites(well))) for well in self._unit.wells
+                (well, tuple(self._acquisition.sites(well)))
+                for well in self._acquisition.wells
             ]
         else:
             self._scene_table = [
-                (well, (site,)) for well, site in self._unit.scene_keys
+                (well, (site,)) for well, site in self._acquisition.scene_keys
             ]
 
-        # Per-scene pyramid shapes, dtype and MetaSeries tags, probed from one
-        # plane on first use. Keyed by scene index because wells within one unit
-        # can differ in shape.
+        # Per-scene pyramid shapes
         self._scene_levels: Dict[int, Tuple[List[Tuple[int, ...]], np.dtype]] = {}
+        # dtype and MetaSeries tags
         self._scene_metaseries: Dict[int, Optional[Dict[str, Any]]] = {}
 
         self._scenes: Optional[Tuple[str, ...]] = None
 
     def _tiles_placeable(self) -> bool:
         """Whether every multi-position well can be laid out as a mosaic."""
-        unit = self._unit
-        multi = [well for well in unit.wells if len(unit.sites(well)) > 1]
+        acq = self._acquisition
+        multi = [well for well in acq.wells if len(acq.sites(well)) > 1]
         if not multi:
             return True
 
-        if not (unit.jdce.pixel_size_x and unit.jdce.pixel_size_y):
+        if not (acq.jdce.pixel_size_x and acq.jdce.pixel_size_y):
             return False
 
         return all(
-            None not in unit.positions.get((well, site), (None, None))
+            None not in acq.positions.get((well, site), (None, None))
             for well in multi
-            for site in unit.sites(well)
+            for site in acq.sites(well)
         )
 
     @staticmethod
     def _is_supported_image(fs: AbstractFileSystem, path: str, **kwargs: Any) -> bool:
-        return acquisition.discover_unit(fs, path) is not None
+        return acquisition.discover_acquisition(fs, path) is not None
 
     @property
     def scenes(self) -> Tuple[str, ...]:
@@ -149,8 +150,7 @@ class Reader(BaseReader):
         Returns
         -------
         scenes: Tuple[str, ...]
-            One scene per well (``"B07"``), or one per well and acquisition
-            position with ``mosaic=False`` (``"B07-s0"``).
+            A tuple of valid scene ids in the file.
         """
         if self._scenes is None:
             self._scenes = tuple(
@@ -193,13 +193,13 @@ class Reader(BaseReader):
 
     def _build(self, delayed_read: bool) -> xr.DataArray:
         well, sites = self._current()
-        timepoints, channels, zs = self._unit.extents(self._current_keys())
+        timepoints, channels, zs = self._acquisition.extents(self._current_keys())
         shape, dtype = self._plane_spec()
         level = self._level()
 
         planes = [
             self._plane_array(
-                self._unit.planes[(well, site)].get((t, channel, z)),
+                self._acquisition.planes[(well, site)].get((t, channel, z)),
                 shape,
                 dtype,
                 level,
@@ -250,11 +250,11 @@ class Reader(BaseReader):
             this opens one TIFF the first time a scene is asked about.
         """
         scale = self._level_scale()
-        pixel_y = self._unit.jdce.pixel_size_y
-        pixel_x = self._unit.jdce.pixel_size_x
+        pixel_y = self._acquisition.jdce.pixel_size_y
+        pixel_x = self._acquisition.jdce.pixel_size_x
 
         return PhysicalPixelSizes(
-            self._unit.jdce.z_step,
+            self._acquisition.jdce.z_step,
             pixel_y * scale if pixel_y is not None else None,
             pixel_x * scale if pixel_x is not None else None,
         )
@@ -262,12 +262,12 @@ class Reader(BaseReader):
     @property
     def binning(self) -> Optional[str]:
         """Camera binning as ``"<x>x<y>"``, e.g. ``"1x1"``."""
-        return self._unit.jdce.binning
+        return self._acquisition.jdce.binning
 
     @property
     def objective(self) -> Optional[str]:
         """The objective the acquisition was taken with."""
-        return self._unit.jdce.objective
+        return self._acquisition.jdce.objective
 
     @property
     def row(self) -> Optional[str]:
@@ -284,7 +284,8 @@ class Reader(BaseReader):
         """
         The current scene's acquisition position within its well.
 
-        None with ``mosaic=True``, where a scene is a whole well rather than one
+        None with ``reconstruct_mosaic=True``, where a scene is a whole well
+        rather than one
         of its positions.
         """
         return None if self._mosaic else self._current()[1][0]
@@ -292,7 +293,7 @@ class Reader(BaseReader):
     @property
     def imaged_by(self) -> Optional[str]:
         """The acquisition protocol's user, falling back to the station login."""
-        return self._unit.jdce.operator
+        return self._acquisition.jdce.operator
 
     @property
     def imaging_datetime(self) -> Optional[datetime]:
@@ -303,10 +304,10 @@ class Reader(BaseReader):
         time. Falls back to the manifest's first timestamp, which is a Unix epoch
         and so returns a UTC-aware datetime instead.
         """
-        if self._unit.jdce.acquired_at is not None:
-            return self._unit.jdce.acquired_at
+        if self._acquisition.jdce.acquired_at is not None:
+            return self._acquisition.jdce.acquired_at
 
-        first = self._unit.first_timestamp
+        first = self._acquisition.first_timestamp
         if first is None:
             return None
 
@@ -317,14 +318,15 @@ class Reader(BaseReader):
         """
         Stage X and Y of the current scene in microns, from the manifest.
 
-        With ``mosaic=True`` this is the first tile's position. Every tile's own
+        With ``reconstruct_mosaic=True`` this is the first tile's position.
+        Every tile's own
         position is on ``metadata["tile_stage_positions_um"]``; the stitched
         image is placed from the top-left-most of them, which need not be this
         one.
         """
         well, sites = self._current()
 
-        return self._unit.positions.get((well, sites[0]), (None, None))
+        return self._acquisition.positions.get((well, sites[0]), (None, None))
 
     @property
     def time_interval(self) -> TimeInterval:
@@ -338,7 +340,7 @@ class Reader(BaseReader):
         if duration is None:
             return None
 
-        timepoints, _, _ = self._unit.extents(self._current_keys())
+        timepoints, _, _ = self._acquisition.extents(self._current_keys())
 
         return duration / (len(timepoints) - 1)
 
@@ -349,7 +351,7 @@ class Reader(BaseReader):
 
         None when the manifest is absent or does not timestamp every time point.
         """
-        elapsed = self._unit.time_coords(self._current_keys())
+        elapsed = self._acquisition.time_coords(self._current_keys())
         if elapsed is None or len(elapsed) < 2:
             return None
 
@@ -435,9 +437,12 @@ class Reader(BaseReader):
         if len(sites) == 1:
             return [(0, 0)]
 
-        stage = [self._unit.positions.get((well, site), (None, None)) for site in sites]
-        pixel_y = self._unit.jdce.pixel_size_y
-        pixel_x = self._unit.jdce.pixel_size_x
+        stage = [
+            self._acquisition.positions.get((well, site), (None, None))
+            for site in sites
+        ]
+        pixel_y = self._acquisition.jdce.pixel_size_y
+        pixel_x = self._acquisition.jdce.pixel_size_x
 
         if not all(x is not None and y is not None for x, y in stage) or not (
             pixel_x and pixel_y
@@ -538,9 +543,9 @@ class Reader(BaseReader):
     def _plane_paths(self) -> List[str]:
         """Every plane path of the current scene, in index order."""
         return [
-            self._unit.planes[key][plane]
+            self._acquisition.planes[key][plane]
             for key in self._current_keys()
-            for plane in sorted(self._unit.planes[key])
+            for plane in sorted(self._acquisition.planes[key])
         ]
 
     def _level(self) -> int:
@@ -585,27 +590,31 @@ class Reader(BaseReader):
     def _coords(self, zs: List[int]) -> Dict[str, Any]:
         keys = self._current_keys()
         coords: Dict[str, Any] = {
-            DimensionNames.Channel: self._unit.channel_names(keys)
+            DimensionNames.Channel: self._acquisition.channel_names(keys)
         }
 
-        times = self._unit.time_coords(keys)
+        times = self._acquisition.time_coords(keys)
         if times is not None:
             coords[DimensionNames.Time] = times
 
-        if self._unit.jdce.z_step:
-            coords[DimensionNames.SpatialZ] = [z * self._unit.jdce.z_step for z in zs]
+        if self._acquisition.jdce.z_step:
+            coords[DimensionNames.SpatialZ] = [
+                z * self._acquisition.jdce.z_step for z in zs
+            ]
 
         return coords
 
     def _unprocessed_metadata(self) -> Dict[str, Any]:
         """The descriptor plus the plate position a writer needs to place a scene."""
         well, sites = self._current()
-        positions = [self._unit.positions.get((well, s), (None, None)) for s in sites]
+        positions = [
+            self._acquisition.positions.get((well, s), (None, None)) for s in sites
+        ]
         origin_x, origin_y = positions[0]
 
         row, column = acquisition.split_well(well)
         metadata: Dict[str, Any] = {
-            "jdce": self._unit.jdce.raw,
+            "jdce": self._acquisition.jdce.raw,
             "well": well,
             "row": row,
             "column": column,
@@ -622,21 +631,6 @@ class Reader(BaseReader):
             metadata["metaseries"] = metaseries
 
         return metadata
-
-    def _why_unsupported(self) -> str:
-        sub_units = acquisition.find_sub_units(self._fs, self._path)
-        if sub_units:
-            return (
-                "This is a run root holding several acquisitions; open one of: "
-                f"{', '.join(sub_units)}."
-            )
-
-        return (
-            "Expected an ImageXpress acquisition directory containing a '.jdce' "
-            "descriptor and 'timepoint<N>' folders, or the '.jdce' file itself. "
-            "On a filesystem that serves files but cannot list directories, name "
-            "the '.jdce' descriptor directly."
-        )
 
 
 ###############################################################################

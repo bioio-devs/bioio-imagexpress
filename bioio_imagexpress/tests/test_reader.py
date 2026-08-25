@@ -1,12 +1,10 @@
 import pathlib
 import shutil
-from itertools import product
 from typing import List, Optional, Tuple
 
 import bioio
 import numpy as np
 import pytest
-import tifffile
 from bioio_base import dimensions, exceptions, test_utilities
 
 from bioio_imagexpress import Reader
@@ -102,12 +100,12 @@ def test_imagexpress_reader_without_mosaic() -> None:
         expected_physical_pixel_sizes=(None, 1.6595, 1.6595),
         expected_metadata_type=dict,
         expected_resolution_levels=(0, 1, 2),
-        reader_kwargs=dict(mosaic=False),
+        reader_kwargs=dict(reconstruct_mosaic=False),
     )
 
     # Each per-site scene is the matching mosaic tile of the same well.
     mosaic = Reader(EXPERIMENT)
-    tiles = Reader(EXPERIMENT, mosaic=False)
+    tiles = Reader(EXPERIMENT, reconstruct_mosaic=False)
     for scene, expected in zip(("B02-s0", "B02-s1"), mosaic.data):
         tiles.set_scene(scene)
         assert tiles.position_index == int(scene[-1])
@@ -117,7 +115,7 @@ def test_imagexpress_reader_without_mosaic() -> None:
 @pytest.mark.parametrize(
     "path, error_mentions",
     [
-        pytest.param(RUN_ROOT, ["experiment", "experiment_montage"], id="run_root"),
+        pytest.param(RUN_ROOT, ["run root"], id="run_root"),
         pytest.param(RUN_ROOT / "autofocus", [], id="not_an_acquisition"),
         pytest.param(
             Z_STACK / "timepoint0" / "Wellscan_96well_TL_488_t0_B07_s0_w0_z0.tif",
@@ -136,7 +134,8 @@ def test_imagexpress_reader_unsupported(
 
     for expected in error_mentions:
         assert expected in str(caught.value)
-        
+
+
 def test_missing_manifest_raises(tmp_path: pathlib.Path) -> None:
     acquisition = tmp_path / "experiment"
     shutil.copytree(EXPERIMENT, acquisition)

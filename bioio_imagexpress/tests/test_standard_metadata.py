@@ -115,7 +115,7 @@ def test_standard_metadata_follows_set_scene(
 
 
 @pytest.mark.parametrize(
-    "mosaic, scene, expected_position_index",
+    "reconstruct_mosaic, scene, expected_position_index",
     [
         (True, "B02", None),
         (False, "B02-s0", 0),
@@ -123,10 +123,13 @@ def test_standard_metadata_follows_set_scene(
     ],
 )
 def test_standard_metadata_position_index(
-    mosaic: bool, scene: str, expected_position_index: Optional[int]
+    reconstruct_mosaic: bool, scene: str, expected_position_index: Optional[int]
 ) -> None:
     """A whole-well scene has no position; a per-site scene reports its site."""
-    reader = Reader(LOCAL_RESOURCES_DIR / "run_root/experiment", mosaic=mosaic)
+    reader = Reader(
+        LOCAL_RESOURCES_DIR / "run_root/experiment",
+        reconstruct_mosaic=reconstruct_mosaic,
+    )
     reader.set_scene(scene)
 
     assert reader.standard_metadata.to_dict()["Position Index"] == (

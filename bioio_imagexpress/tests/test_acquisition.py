@@ -14,13 +14,13 @@ Z_STACK = LOCAL_RESOURCES_DIR / "experiment_z_stack"
 EXPERIMENT = LOCAL_RESOURCES_DIR / "run_root" / "experiment"
 
 
-def build_unit(directory: pathlib.Path) -> acquisition.AcquisitionUnit:
+def index_acquisition(directory: pathlib.Path) -> acquisition.Acquisition:
     """Index the acquisition in ``directory`` off the local filesystem."""
     fs = LocalFileSystem()
-    discovered = acquisition.discover_unit(fs, str(directory))
+    discovered = acquisition.discover_acquisition(fs, str(directory))
     assert discovered is not None
 
-    return acquisition.build_unit(fs, *discovered)
+    return acquisition.index_acquisition(fs, *discovered)
 
 
 @pytest.mark.parametrize(
@@ -144,23 +144,25 @@ def test_acquisition_unit_accessors(
     expected_channel_names: List[str],
     expected_time_coords: List[float],
 ) -> None:
-    unit = build_unit(directory)
-    keys = unit.scene_keys
+    acq = index_acquisition(directory)
+    keys = acq.scene_keys
 
-    assert unit.wells == expected_wells
+    assert acq.wells == expected_wells
     assert keys == [(well, site) for well in expected_wells for site in expected_sites]
-    assert unit.sites(expected_wells[0]) == expected_sites
-    assert unit.sites("Z99") == []
-    assert unit.extents(keys) == expected_extents
-    assert unit.channel_names(keys) == expected_channel_names
-    assert unit.time_coords(keys) == pytest.approx(expected_time_coords)
+    assert acq.sites(expected_wells[0]) == expected_sites
+    assert acq.sites("Z99") == []
+    assert acq.extents(keys) == expected_extents
+    assert acq.channel_names(keys) == expected_channel_names
+    assert acq.time_coords(keys) == pytest.approx(expected_time_coords)
 
 
-def test_build_unit_without_manifest_indexes_nothing(tmp_path: pathlib.Path) -> None:
+def test_index_acquisition_without_manifest_indexes_nothing(
+    tmp_path: pathlib.Path,
+) -> None:
     copied = tmp_path / "experiment"
     shutil.copytree(EXPERIMENT, copied)
     (copied / "image_metadata_1.csv").unlink()
 
-    unit = build_unit(copied)
+    acq = index_acquisition(copied)
 
-    assert unit.planes == {}
+    assert acq.planes == {}
