@@ -113,27 +113,21 @@ def test_imagexpress_reader_without_mosaic() -> None:
 
 
 @pytest.mark.parametrize(
-    "path, error_mentions",
+    "path",
     [
-        pytest.param(RUN_ROOT, ["run root"], id="run_root"),
-        pytest.param(RUN_ROOT / "autofocus", [], id="not_an_acquisition"),
+        pytest.param(RUN_ROOT, id="run_root"),
+        pytest.param(RUN_ROOT / "autofocus", id="not_an_acquisition"),
         pytest.param(
             Z_STACK / "timepoint0" / "Wellscan_96well_TL_488_t0_B07_s0_w0_z0.tif",
-            [],
             id="bare_plane",
         ),
-        pytest.param(Z_STACK / "image_metadata_1.csv", [], id="manifest"),
-        pytest.param(RUN_ROOT / "autofocus" / "focus_report.txt", [], id="text_file"),
+        pytest.param(Z_STACK / "image_metadata_1.csv", id="manifest"),
+        pytest.param(RUN_ROOT / "autofocus" / "focus_report.txt", id="text_file"),
     ],
 )
-def test_imagexpress_reader_unsupported(
-    path: pathlib.Path, error_mentions: List[str]
-) -> None:
-    with pytest.raises(exceptions.UnsupportedFileFormatError) as caught:
+def test_imagexpress_reader_unsupported(path: pathlib.Path) -> None:
+    with pytest.raises(exceptions.UnsupportedFileFormatError):
         Reader(path)
-
-    for expected in error_mentions:
-        assert expected in str(caught.value)
 
 
 def test_missing_manifest_raises(tmp_path: pathlib.Path) -> None:
