@@ -109,9 +109,6 @@ def parse_jdce(contents: str) -> JdceMetadata:
     stack = raw.get("ImageStack", {})
     protocol = stack.get("AutoLeadAcquisitionProtocol", {})
     calibration = protocol.get("ObjectiveCalibration", {})
-
-    # Names are keyed by the descriptor's own Index, which is what the plane
-    # filenames' _w<N> and the manifest's Wavelength column refer to.
     wavelengths = protocol.get("Wavelengths", []) or []
     channel_names: Dict[int, str] = {}
     for wavelength in wavelengths:
@@ -120,9 +117,6 @@ def parse_jdce(contents: str) -> JdceMetadata:
         if name and index is not None:
             channel_names[index] = name
 
-    # Z spacing lives only here: the manifest's PositionZUm is absolute stage Z
-    # and the TIFF resolution tags are unset. 0.0 and unparseable values are
-    # both "no spacing"; keep scanning past them.
     z_step = next(
         (v for v in (_as_float(w.get("ZStep")) for w in wavelengths) if v), None
     )
@@ -136,12 +130,9 @@ def parse_jdce(contents: str) -> JdceMetadata:
         pixel_size_y=_as_float(calibration.get("PixelHeight")),
         z_step=z_step,
         objective=calibration.get("ObjectiveName"),
-        # "1 X 1" becomes "1x1", the form other bioio readers report.
         binning=re.sub(r"\s*[xX]\s*", "x", str(binning).strip()) if binning else None,
         operator=stack.get("Operator", {}).get("Login") or None,
         acquired_at=_parse_creation(stack.get("Creation", {})),
-        # The descriptor names its own manifests, which is what lets an acquisition be
-        # indexed without listing a single directory.
         metadata_files=[
             _as_relpath(str(n)) for n in (stack.get("ImageMetadataFiles") or []) if n
         ],
@@ -149,8 +140,6 @@ def parse_jdce(contents: str) -> JdceMetadata:
 
 
 def _parse_creation(creation: Dict[str, Any]) -> Optional[datetime]:
-    # Naive on purpose: this is the instrument's local wall clock, and the
-    # accompanying TimeZoneOffset does not describe it.
     date = (creation.get("Date") or "").strip()
     time = (creation.get("Time") or "").strip()
     if not date or not time:
@@ -269,7 +258,6 @@ class Acquisition:
 
         def order(key: SceneKey) -> Tuple[int, str, int, int]:
             row, column = well_to_row_column(key[0])
-            # Single-letter rows precede the double-letter rows below them.
             return len(row), row, column, key[1]
 
         return sorted(self.planes, key=order)
@@ -377,7 +365,7 @@ def discover_acquisition(
             found = False
         return (posixpath.dirname(path), path) if found else None
 
-    names = _names_in(fs, path)
+    names = _list_dir_names(fs, path)
     descriptors = sorted(
         posixpath.join(path, name)
         for name in names
@@ -416,28 +404,21 @@ def index_acquisition(
     Returns
     -------
     acquisition: Acquisition
-        Indexed from the ``image_metadata_*.csv`` manifests, which name every
-        plane's subfolder and filename, so the whole acquisition resolves without
-        listing a directory. The manifests are the one source of truth for
-        which planes exist: an acquisition whose manifests cannot be read indexes no
-        planes, which the reader refuses.
+        The plane index, built from the ``image_metadata_*.csv`` manifests.
     """
     try:
         with fs.open(descriptor, "r", encoding="utf-8-sig") as handle:
             jdce = parse_jdce(handle.read())
     except Exception as exc:
-        # A malformed descriptor costs pixel sizes and channel names, not the read.
         log.warning("Could not parse descriptor %s: %s", descriptor, exc)
         jdce = JdceMetadata()
 
-    # The descriptor names its own manifests; only fall back to listing when it
-    # does not, or could not be read.
     if jdce.metadata_files:
         manifests = [posixpath.join(path, name) for name in jdce.metadata_files]
     else:
         manifests = sorted(
             posixpath.join(path, name)
-            for name in _names_in(fs, path)
+            for name in _list_dir_names(fs, path)
             if name.lower().startswith("image_metadata_")
             and name.lower().endswith(".csv")
         )
@@ -452,8 +433,8 @@ def index_acquisition(
 
     acq = Acquisition(path=path, jdce=jdce)
 
-    # Plane paths are composed rather than confirmed; a row naming a file that
-    # was never written surfaces as a read error when that plane is asked for.
+    # Plane paths are composed, not confirmed; a missing file surfaces when
+    # the plane is read.
     for row in rows:
         scene: SceneKey = (row.well, row.site)
         acq.planes.setdefault(scene, {}).setdefault(
@@ -462,8 +443,6 @@ def index_acquisition(
         )
 
         if row.timestamp_s is not None:
-            # The scene's first plane of a time point stands in for the whole
-            # time point; other scenes were imaged at other times.
             stamps = acq.timestamps.setdefault(scene, {})
             recorded = stamps.get(row.t)
             if recorded is None or row.timestamp_s < recorded:
@@ -475,9 +454,8 @@ def index_acquisition(
     return acq
 
 
-def _names_in(fs: AbstractFileSystem, path: str) -> List[str]:
-    # "Cannot list" is a supported state here rather than a failure, and backends
-    # signal it with everything from OSError to aiohttp's own exceptions.
+def _list_dir_names(fs: AbstractFileSystem, path: str) -> List[str]:
+    # A filesystem that cannot list is a supported state, not an error.
     try:
         return [posixpath.basename(p.rstrip("/")) for p in fs.ls(path, detail=False)]
     except Exception as exc:
