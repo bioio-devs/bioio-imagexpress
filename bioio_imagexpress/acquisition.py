@@ -116,18 +116,14 @@ def parse_jdce(contents: str) -> JdceMetadata:
     calibration = protocol.get("ObjectiveCalibration", {})
 
     # Names are keyed by the descriptor's own Index, which is what the plane
-    # filenames' _w<N> and the manifest's Wavelength column refer to. List
-    # position stands in only when a wavelength carries no Index.
-    wavelengths = sorted(
-        protocol.get("Wavelengths", []) or [],
-        key=lambda w: _as_int(w.get("Index")) or 0,
-    )
+    # filenames' _w<N> and the manifest's Wavelength column refer to.
+    wavelengths = protocol.get("Wavelengths", []) or []
     channel_names: Dict[int, str] = {}
-    for position, wavelength in enumerate(wavelengths):
+    for wavelength in wavelengths:
         name = (wavelength.get("EmissionFilter") or {}).get("Name")
         index = _as_int(wavelength.get("Index"))
-        if name:
-            channel_names.setdefault(index if index is not None else position, name)
+        if name and index is not None:
+            channel_names[index] = name
 
     # Z spacing lives only here: the manifest's PositionZUm is absolute stage Z
     # and the TIFF resolution tags are unset. 0.0 and unparseable values are
@@ -135,27 +131,19 @@ def parse_jdce(contents: str) -> JdceMetadata:
     z_step = next(
         (v for v in (_as_float(w.get("ZStep")) for w in wavelengths) if v), None
     )
-    if not z_step:
-        z_params = protocol.get("PlateMap", {}).get("ZDimensionParameters", {})
-        z_step = _as_float(z_params.get("Step"))
 
     binning = protocol.get("Camera", {}).get("Binning")
-    project_information = protocol.get("ProjectInformation", {})
 
     return JdceMetadata(
         raw=raw,
         channel_names=channel_names,
         pixel_size_x=_as_float(calibration.get("PixelWidth")),
         pixel_size_y=_as_float(calibration.get("PixelHeight")),
-        z_step=z_step or None,
+        z_step=z_step,
         objective=calibration.get("ObjectiveName"),
         # "1 X 1" becomes "1x1", the form other bioio readers report.
         binning=re.sub(r"\s*[xX]\s*", "x", str(binning).strip()) if binning else None,
-        operator=(
-            project_information.get("User", {}).get("Name")
-            or stack.get("Operator", {}).get("Login")
-            or None
-        ),
+        operator=stack.get("Operator", {}).get("Login") or None,
         acquired_at=_parse_creation(stack.get("Creation", {})),
         # The descriptor names its own manifests, which is what lets an acquisition be
         # indexed without listing a single directory.
@@ -169,13 +157,12 @@ def _parse_creation(creation: Dict[str, Any]) -> Optional[datetime]:
     # Naive on purpose: this is the instrument's local wall clock, and the
     # accompanying TimeZoneOffset does not describe it.
     date = (creation.get("Date") or "").strip()
-    if not date:
+    time = (creation.get("Time") or "").strip()
+    if not date or not time:
         return None
 
     try:
-        return datetime.fromisoformat(
-            f"{date}T{(creation.get('Time') or '').strip() or '00:00:00'}"
-        )
+        return datetime.fromisoformat(f"{date}T{time}")
     except ValueError:
         return None
 
@@ -189,7 +176,7 @@ def _as_float(value: Any) -> Optional[float]:
 
 def _as_int(value: Any) -> Optional[int]:
     try:
-        return int(float(value))
+        return int(value)
     except (TypeError, ValueError):
         return None
 
@@ -255,8 +242,7 @@ def read_manifest(contents: str) -> List[ManifestRow]:
                 channel=int(channel),  # type: ignore[arg-type]
                 t=int(t),  # type: ignore[arg-type]
                 z=int(z),  # type: ignore[arg-type]
-                subfolder=_as_relpath(record.get("ImageSubFolderPath") or "")
-                or f"{TIMEPOINT_DIR_PREFIX}{t}",
+                subfolder=_as_relpath(record.get("ImageSubFolderPath") or ""),
                 filename=_as_relpath(filename),
                 timestamp_s=_as_float(record.get("TimeStampSec")),
                 position_x_um=_as_float(record.get("PositionXUm")),
@@ -368,7 +354,7 @@ class Acquisition:
 
 def discover_acquisition(
     fs: AbstractFileSystem, path: str
-) -> Optional[Tuple[str, Optional[str]]]:
+) -> Optional[Tuple[str, str]]:
     """
     Resolve a user-supplied path to a single acquisition.
 
@@ -381,7 +367,7 @@ def discover_acquisition(
 
     Returns
     -------
-    acquisition: Optional[Tuple[str, Optional[str]]]
+    acquisition: Optional[Tuple[str, str]]
         The acquisition's directory and its descriptor, or None if the path is not an
         acquisition. Naming the descriptor is accepted on its existence alone,
         without the ``timepoint<N>`` check the directory form makes, because that
@@ -389,7 +375,7 @@ def discover_acquisition(
     """
     path = path.rstrip("/")
 
-    if path.lower().endswith(JDCE_EXTENSION) and not _isdir(fs, path):
+    if path.lower().endswith(JDCE_EXTENSION):
         return (posixpath.dirname(path), path) if _exists(fs, path) else None
 
     descriptors = find_descriptors(fs, path)
@@ -408,7 +394,7 @@ def discover_acquisition(
 
 
 def index_acquisition(
-    fs: AbstractFileSystem, path: str, descriptor: Optional[str]
+    fs: AbstractFileSystem, path: str, descriptor: str
 ) -> Acquisition:
     """
     Index one acquisition, opening no TIFF.
@@ -419,7 +405,7 @@ def index_acquisition(
         The filesystem the acquisition lives on.
     path: str
         The acquisition's directory.
-    descriptor: Optional[str]
+    descriptor: str
         The acquisition's ``.jdce`` file.
 
     Returns
@@ -481,10 +467,7 @@ def _manifest_paths(fs: AbstractFileSystem, path: str, jdce: JdceMetadata) -> Li
     )
 
 
-def _read_jdce(fs: AbstractFileSystem, descriptor: Optional[str]) -> JdceMetadata:
-    if descriptor is None:
-        return JdceMetadata()
-
+def _read_jdce(fs: AbstractFileSystem, descriptor: str) -> JdceMetadata:
     try:
         with fs.open(descriptor, "r", encoding="utf-8-sig") as handle:
             return parse_jdce(handle.read())
@@ -524,13 +507,6 @@ def _names_in(fs: AbstractFileSystem, path: str) -> List[str]:
     except Exception as exc:
         log.debug("Could not list %s: %s", path, exc)
         return []
-
-
-def _isdir(fs: AbstractFileSystem, path: str) -> bool:
-    try:
-        return bool(fs.isdir(path))
-    except Exception:
-        return False
 
 
 def _exists(fs: AbstractFileSystem, path: str) -> bool:
