@@ -117,10 +117,11 @@ class Reader(BaseReader):
                 (well, (site,)) for well, site in self._acquisition.scene_keys
             ]
 
-        # Per-scene pyramid shapes
-        self._scene_levels: Dict[int, Tuple[List[Tuple[int, ...]], np.dtype]] = {}
-        # dtype and MetaSeries tags
-        self._scene_metaseries: Dict[int, Optional[Dict[str, Any]]] = {}
+        # The current scene's (level_shapes, dtype, metaseries), read lazily
+        # from one plane and reset on scene change by _reset_self.
+        self._plane_metadata: Optional[
+            Tuple[List[Tuple[int, ...]], np.dtype, Optional[Dict[str, Any]]]
+        ] = None
 
         self._scenes: Optional[Tuple[str, ...]] = None
 
@@ -194,14 +195,14 @@ class Reader(BaseReader):
     def _build(self, delayed_read: bool) -> xr.DataArray:
         well, sites = self._current()
         timepoints, channels, zs = self._acquisition.extents(self._current_keys())
-        shape, dtype = self._plane_spec()
         level = self._level()
+        shape = self._level_shapes[level]
 
         planes = [
             self._plane_array(
                 self._acquisition.planes[(well, site)].get((t, channel, z)),
                 shape,
-                dtype,
+                self._plane_dtype,
                 level,
                 delayed_read,
             )
@@ -234,7 +235,7 @@ class Reader(BaseReader):
         resolution_levels: Tuple[int, ...]
             The levels of the pyramid MetaXpress writes into each plane.
         """
-        return tuple(range(len(self._levels()[0])))
+        return tuple(range(len(self._level_shapes)))
 
     # Metadata
 
@@ -502,55 +503,78 @@ class Reader(BaseReader):
 
         return [(well, site) for site in sites]
 
-    def _levels(self) -> Tuple[List[Tuple[int, ...]], np.dtype]:
+    def _reset_self(self) -> None:
+        self._plane_metadata = None
+        super()._reset_self()
+
+    @property
+    def _level_shapes(self) -> List[Tuple[int, ...]]:
+        """Pyramid shapes of the current scene's planes."""
+        if self._plane_metadata is None:
+            self._plane_metadata = self._read_plane_metadata()
+
+        return self._plane_metadata[0]
+
+    @property
+    def _plane_dtype(self) -> np.dtype:
+        """Pixel dtype of the current scene's planes."""
+        if self._plane_metadata is None:
+            self._plane_metadata = self._read_plane_metadata()
+
+        return self._plane_metadata[1]
+
+    @property
+    def _metaseries(self) -> Optional[Dict[str, Any]]:
+        """MetaSeries tags of the current scene's planes, when readable."""
+        if self._plane_metadata is None:
+            self._plane_metadata = self._read_plane_metadata()
+
+        return self._plane_metadata[2]
+
+    def _read_plane_metadata(
+        self,
+    ) -> Tuple[List[Tuple[int, ...]], np.dtype, Optional[Dict[str, Any]]]:
         """
-        The current scene's pyramid shapes and dtype, probed from one plane.
+        Read the current scene's pyramid shapes, dtype and MetaSeries tags off
+        one plane.
 
         A plane that cannot be opened must not take the whole scene's metadata
-        with it, so the probe moves on to the next plane; its own pixels still
+        with it, so the read moves on to the next plane; its own pixels still
         raise when they are asked for.
         """
-        scene_index = self._current_scene_index
-        if scene_index not in self._scene_levels:
-            error: Optional[Exception] = None
-            for path in self._plane_paths():
-                try:
-                    with self._fs.open(path, "rb") as handle:
-                        with tifffile.TiffFile(handle) as tiff:
-                            series = tiff.series[0]
-                            self._scene_levels[scene_index] = (
-                                [tuple(level.shape) for level in series.levels],
-                                np.dtype(series.dtype),
-                            )
-                            try:
-                                self._scene_metaseries[
-                                    scene_index
-                                ] = tiff.metaseries_metadata
-                            except Exception as exc:
-                                log.debug("Could not read MetaSeries tags: %s", exc)
-                                self._scene_metaseries[scene_index] = None
-                    break
-                except Exception as exc:
-                    error = exc
-                    log.warning("Could not probe %s: %s", path, exc)
-            else:
-                raise IOError(
-                    f"No plane of scene '{self.current_scene}' could be opened."
-                ) from error
-
-        return self._scene_levels[scene_index]
-
-    def _plane_paths(self) -> List[str]:
-        """Every plane path of the current scene, in index order."""
-        return [
+        paths = [
             self._acquisition.planes[key][plane]
             for key in self._current_keys()
             for plane in sorted(self._acquisition.planes[key])
         ]
+        error: Optional[Exception] = None
+        for path in paths:
+            try:
+                with self._fs.open(path, "rb") as handle:
+                    with tifffile.TiffFile(handle) as tiff:
+                        series = tiff.series[0]
+                        try:
+                            metaseries = tiff.metaseries_metadata
+                        except Exception as exc:
+                            log.debug("Could not read MetaSeries tags: %s", exc)
+                            metaseries = None
+
+                        return (
+                            [tuple(level.shape) for level in series.levels],
+                            np.dtype(series.dtype),
+                            metaseries,
+                        )
+            except Exception as exc:
+                error = exc
+                log.warning("Could not probe %s: %s", path, exc)
+
+        raise IOError(
+            f"No plane of scene '{self.current_scene}' could be opened."
+        ) from error
 
     def _level(self) -> int:
         level = self._current_resolution_level
-        available = len(self._levels()[0])
+        available = len(self._level_shapes)
         if level >= available:
             # set_resolution_level validated against another scene's pyramid.
             raise IndexError(
@@ -563,14 +587,9 @@ class Reader(BaseReader):
 
     def _level_scale(self) -> float:
         """Linear downsample factor of the current level relative to level 0."""
-        shapes, _ = self._levels()
+        shapes = self._level_shapes
 
         return shapes[0][-1] / shapes[self._level()][-1]
-
-    def _plane_spec(self) -> Tuple[Tuple[int, ...], np.dtype]:
-        shapes, dtype = self._levels()
-
-        return shapes[self._level()], dtype
 
     def _plane_array(
         self,
@@ -625,10 +644,8 @@ class Reader(BaseReader):
             ],
         }
 
-        self._levels()  # The probe that fills the MetaSeries cache.
-        metaseries = self._scene_metaseries.get(self._current_scene_index)
-        if metaseries is not None:
-            metadata["metaseries"] = metaseries
+        if self._metaseries is not None:
+            metadata["metaseries"] = self._metaseries
 
         return metadata
 
