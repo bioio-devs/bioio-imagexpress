@@ -27,8 +27,8 @@ TEST_CASES = [
             "Pixel Size Z": 3.0,
             "Position Index": None,
             "Row": "B",
-            "Stage Position X": 67696.78,
-            "Stage Position Y": 19757.0,
+            "Stage Position X": 67696.83,
+            "Stage Position Y": 20360.07,
             "Timelapse": True,
             "Timelapse Interval": datetime.timedelta(
                 seconds=21599, microseconds=754000
@@ -58,8 +58,8 @@ TEST_CASES = [
             "Pixel Size Z": None,
             "Position Index": None,
             "Row": "B",
-            "Stage Position X": 21579.42,
-            "Stage Position Y": 18639.46,
+            "Stage Position X": 21579.43,
+            "Stage Position Y": 20360.01,
             "Timelapse": False,
             "Timelapse Interval": None,
             "Total Time Duration": None,

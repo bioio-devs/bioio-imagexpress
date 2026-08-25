@@ -319,23 +319,29 @@ class Reader(BaseReader):
         """
         Stage X and Y of the current scene in microns, from the manifest.
 
-        With ``reconstruct_mosaic=True`` this is the first tile's position.
-        Every tile's own
-        position is on ``metadata["tile_stage_positions_um"]``; the stitched
-        image is placed from the top-left-most of them, which need not be this
-        one.
+        With ``reconstruct_mosaic=True`` this is the centroid of the tile
+        positions. Every tile's own position is on
+        ``metadata["tile_stage_positions_um"]``.
         """
         well, sites = self._current()
+        stage = [
+            self._acquisition.positions.get((well, site), (None, None))
+            for site in sites
+        ]
+        if any(x is None or y is None for x, y in stage):
+            return (None, None)
 
-        return self._acquisition.positions.get((well, sites[0]), (None, None))
+        positions = [(float(x), float(y)) for x, y in stage]  # type: ignore[arg-type]
+
+        return (
+            sum(x for x, _ in positions) / len(positions),
+            sum(y for _, y in positions) / len(positions),
+        )
 
     @property
     def time_interval(self) -> TimeInterval:
         """
         Average interval between the current scene's time points.
-
-        Measured from the manifest's timestamps rather than the descriptor's
-        schedule, so a run that drifted or was cut short reports what happened.
         """
         duration = self.total_time_duration
         if duration is None:
@@ -349,8 +355,6 @@ class Reader(BaseReader):
     def total_time_duration(self) -> Optional[timedelta]:
         """
         Elapsed time from the first to the last time point of the current scene.
-
-        None when the manifest is absent or does not timestamp every time point.
         """
         elapsed = self._acquisition.time_coords(self._current_keys())
         if elapsed is None or len(elapsed) < 2:
@@ -361,11 +365,7 @@ class Reader(BaseReader):
     @property
     def standard_metadata(self) -> StandardMetadata:
         """
-        Returns
-        -------
-        metadata: StandardMetadata
-            The standard field set, filled from the descriptor and the manifest.
-            Sizes, dimension order and pixel sizes come from the base.
+        Return the embedded metadata for this reader.
         """
         metadata = super().standard_metadata
 
