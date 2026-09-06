@@ -28,7 +28,13 @@ classifiers = [
 ]
 dynamic = ["version"]
 dependencies = [
-  "bioio-base>=0.2.0",
+  "bioio-base>=3.4.0",
+  "dask[array]>=2021.4.1",
+  "fsspec>=2022.8.0",
+  "imagecodecs>=2020.5.30",
+  "numpy>=1.21",
+  "tifffile>=2021.8.30",
+  "xarray>=0.16.1",
 ]
 
 [project.urls]
@@ -44,6 +50,7 @@ lint = [
   "pre-commit>=2.20.0",
 ]
 test = [
+  "bioio>=3.0.0",
   "coverage>=5.1",
   "pytest>=5.4.3",
   "pytest-cov>=2.9.0",
