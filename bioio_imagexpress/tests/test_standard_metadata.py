@@ -7,69 +7,69 @@ from bioio_imagexpress.reader import Reader
 
 from .conftest import LOCAL_RESOURCES_DIR
 
-TEST_CASES = [
-    pytest.param(
-        "experiment_z_stack",
-        {
-            "Binning": "1x1",
-            "Column": "7",
-            "Dimensions Present": "MTCZYX",
-            "Image Size C": 2,
-            "Image Size T": 2,
-            "Image Size X": 64,
-            "Image Size Y": 64,
-            "Image Size Z": 3,
-            "Imaged By": "moldev",
-            "Imaging Datetime": datetime.datetime(2026, 8, 4, 10, 31, 10),
-            "Objective": "10X Plan Apo Lambda D",
-            "Pixel Size X": 0.5817,
-            "Pixel Size Y": 0.5817,
-            "Pixel Size Z": 3.0,
-            "Position Index": None,
-            "Row": "B",
-            "Stage Position X": 67696.83,
-            "Stage Position Y": 20360.07,
-            "Timelapse": True,
-            "Timelapse Interval": datetime.timedelta(
-                seconds=21599, microseconds=754000
-            ),
-            "Total Time Duration": datetime.timedelta(
-                seconds=21599, microseconds=754000
-            ),
-        },
-        id="experiment_z_stack",
-    ),
-    pytest.param(
-        "run_root/experiment",
-        {
-            "Binning": "1x1",
-            "Column": "2",
-            "Dimensions Present": "MTCZYX",
-            "Image Size C": 1,
-            "Image Size T": 1,
-            "Image Size X": 64,
-            "Image Size Y": 64,
-            "Image Size Z": 1,
-            "Imaged By": "moldev",
-            "Imaging Datetime": datetime.datetime(2026, 8, 7, 15, 7, 15),
-            "Objective": "4X Plan Apo Lambda D",
-            "Pixel Size X": 1.6595,
-            "Pixel Size Y": 1.6595,
-            "Pixel Size Z": None,
-            "Position Index": None,
-            "Row": "B",
-            "Stage Position X": 21579.43,
-            "Stage Position Y": 20360.01,
-            "Timelapse": False,
-            "Timelapse Interval": None,
-            "Total Time Duration": None,
-        },
-        id="run_root_experiment",
-    ),
-]
-
-
-@pytest.mark.parametrize("filename, expected_dict", TEST_CASES)
+@pytest.mark.parametrize(
+    "filename, expected_dict",
+    [
+        pytest.param(
+            "experiment_z_stack",
+            {
+                "Binning": "1x1",
+                "Column": "7",
+                "Dimensions Present": "MTCZYX",
+                "Image Size C": 2,
+                "Image Size T": 2,
+                "Image Size X": 64,
+                "Image Size Y": 64,
+                "Image Size Z": 3,
+                "Imaged By": "moldev",
+                "Imaging Datetime": datetime.datetime(2026, 8, 4, 10, 31, 10),
+                "Objective": "10X Plan Apo Lambda D",
+                "Pixel Size X": 0.5817,
+                "Pixel Size Y": 0.5817,
+                "Pixel Size Z": 3.0,
+                "Position Index": None,
+                "Row": "B",
+                "Stage Position X": 67696.83,
+                "Stage Position Y": 20360.07,
+                "Timelapse": True,
+                "Timelapse Interval": datetime.timedelta(
+                    seconds=21599, microseconds=754000
+                ),
+                "Total Time Duration": datetime.timedelta(
+                    seconds=21599, microseconds=754000
+                ),
+            },
+            id="experiment_z_stack",
+        ),
+        pytest.param(
+            "run_root/experiment",
+            {
+                "Binning": "1x1",
+                "Column": "2",
+                "Dimensions Present": "MTCZYX",
+                "Image Size C": 1,
+                "Image Size T": 1,
+                "Image Size X": 64,
+                "Image Size Y": 64,
+                "Image Size Z": 1,
+                "Imaged By": "moldev",
+                "Imaging Datetime": datetime.datetime(2026, 8, 7, 15, 7, 15),
+                "Objective": "4X Plan Apo Lambda D",
+                "Pixel Size X": 1.6595,
+                "Pixel Size Y": 1.6595,
+                "Pixel Size Z": None,
+                "Position Index": None,
+                "Row": "B",
+                "Stage Position X": 21579.43,
+                "Stage Position Y": 20360.01,
+                "Timelapse": False,
+                "Timelapse Interval": None,
+                "Total Time Duration": None,
+            },
+            id="run_root_experiment",
+        ),
+    ],
+)
 def test_imagexpress_standard_metadata(
     filename: str, expected_dict: Dict[str, Any]
 ) -> None:
