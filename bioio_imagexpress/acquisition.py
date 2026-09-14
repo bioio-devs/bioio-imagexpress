@@ -18,7 +18,7 @@ JDCE_EXTENSION = ".jdce"
 TIMEPOINT_DIR_PREFIX = "timepoint"
 
 # A normalized well label
-WELL_RE = re.compile(r"^([A-Z]{1,2})(\d+)$")
+WELL_RE = re.compile(r"^([A-Z]{1,2})(\d{1,2})$")
 
 # (well, site) -- one acquisition position.
 SceneKey = Tuple[str, int]
@@ -282,14 +282,14 @@ class Acquisition:
         index rather than the descriptor, which promises planes an aborted
         acquisition never wrote.
         """
-        planes: List[PlaneKey] = []
+        all_plane_keys: List[PlaneKey] = []
         for key in keys:
-            planes.extend(self.planes[key])
+            all_plane_keys.extend(self.planes[key])
 
         return (
-            sorted({plane[0] for plane in planes}),
-            sorted({plane[1] for plane in planes}),
-            sorted({plane[2] for plane in planes}),
+            sorted({plane[0] for plane in all_plane_keys}),
+            sorted({plane[1] for plane in all_plane_keys}),
+            sorted({plane[2] for plane in all_plane_keys}),
         )
 
     def channel_names(self, keys: Sequence[SceneKey]) -> List[str]:
