@@ -8,7 +8,11 @@ import numpy as np
 import tifffile
 import xarray as xr
 from bioio_base import constants, exceptions, io
-from bioio_base.dimensions import DEFAULT_DIMENSION_ORDER_LIST, DimensionNames
+from bioio_base.dimensions import (
+    DEFAULT_DIMENSION_ORDER_LIST,
+    DEFAULT_DIMENSION_ORDER_LIST_WITH_MOSAIC_TILES,
+    DimensionNames,
+)
 from bioio_base.reader import Reader as BaseReader
 from bioio_base.standard_metadata import StandardMetadata
 from bioio_base.types import DimSpec, PhysicalPixelSizes, TimeInterval
@@ -40,6 +44,14 @@ class Reader(BaseReader):
     fs_kwargs: Dict[str, Any]
         Any specific keyword arguments to pass down to the fsspec created filesystem.
         Default: {}
+    reconstruct_mosaic: bool
+        Treat each well as one scene, with its acquisition positions on the ``M``
+        dimension. Turn it off for one scene per (well, position) and no ``M``.
+        A well with a single position reads identically either way. Falls back
+        to off, with a warning, when the tiles could not be stitched anyway:
+        placing them needs the manifest's stage positions and the descriptor's
+        pixel size.
+        Default: True
 
     Raises
     ------
@@ -55,6 +67,7 @@ class Reader(BaseReader):
         self,
         image: Any,
         fs_kwargs: Dict[str, Any] = {},
+        reconstruct_mosaic: bool = True,
         **kwargs: Any,
     ):
         self._fs, self._path = io.pathlike_to_fs(
@@ -85,9 +98,23 @@ class Reader(BaseReader):
                 ),
             )
 
-        self._scene_table = [
-            (well, (site,)) for well, site in self._acquisition.scene_keys
-        ]
+        if reconstruct_mosaic and not self._tiles_placeable():
+            log.warning(
+                "Stage positions or pixel size are missing. Tiles cannot be "
+                "stitched; reading one scene per acquisition position instead."
+            )
+            reconstruct_mosaic = False
+
+        self._mosaic = reconstruct_mosaic
+        if reconstruct_mosaic:
+            self._scene_table = [
+                (well, tuple(self._acquisition.sites(well)))
+                for well in self._acquisition.wells
+            ]
+        else:
+            self._scene_table = [
+                (well, (site,)) for well, site in self._acquisition.scene_keys
+            ]
 
         # The current scene's (level_shapes, dtype, metaseries)
         self._plane_metadata: Optional[
@@ -95,6 +122,22 @@ class Reader(BaseReader):
         ] = None
 
         self._scenes: Optional[Tuple[str, ...]] = None
+
+    def _tiles_placeable(self) -> bool:
+        """Whether every multi-position well can be laid out as a mosaic."""
+        acq = self._acquisition
+        multi = [well for well in acq.wells if len(acq.sites(well)) > 1]
+        if not multi:
+            return True
+
+        if not (acq.jdce.pixel_size_x and acq.jdce.pixel_size_y):
+            return False
+
+        return all(
+            None not in acq.positions.get((well, site), (None, None))
+            for well in multi
+            for site in acq.sites(well)
+        )
 
     @staticmethod
     def _is_supported_image(fs: AbstractFileSystem, path: str, **kwargs: Any) -> bool:
@@ -110,7 +153,8 @@ class Reader(BaseReader):
         """
         if self._scenes is None:
             self._scenes = tuple(
-                f"{well}-s{sites[0]}" for well, sites in self._scene_table
+                well if self._mosaic else f"{well}-s{sites[0]}"
+                for well, sites in self._scene_table
             )
 
         return self._scenes
@@ -168,8 +212,12 @@ class Reader(BaseReader):
         )
 
         return xr.DataArray(
-            data[0],
-            dims=DEFAULT_DIMENSION_ORDER_LIST,
+            data if self._mosaic else data[0],
+            dims=(
+                DEFAULT_DIMENSION_ORDER_LIST_WITH_MOSAIC_TILES
+                if self._mosaic
+                else DEFAULT_DIMENSION_ORDER_LIST
+            ),
             coords=self._coords(zs),
             attrs={constants.METADATA_UNPROCESSED: self._unprocessed_metadata()},
         )
@@ -232,7 +280,7 @@ class Reader(BaseReader):
         """
         The current scene's acquisition position within its well.
         """
-        return self._current()[1][0]
+        return None if self._mosaic else self._current()[1][0]
 
     @property
     def imaged_by(self) -> Optional[str]:
@@ -257,6 +305,10 @@ class Reader(BaseReader):
     def stage_position(self) -> Tuple[Optional[float], Optional[float]]:
         """
         Stage X and Y of the current scene in microns, from the manifest.
+
+        With ``reconstruct_mosaic=True`` this is the centroid of the tile
+        positions. Every tile's own position is on
+        ``metadata["tile_stage_positions_um"]``.
         """
         well, sites = self._current()
         stage = [
@@ -315,6 +367,111 @@ class Reader(BaseReader):
         metadata.total_time_duration = self.total_time_duration
 
         return metadata
+
+    # Mosaic
+
+    def get_mosaic_tile_position(
+        self, mosaic_tile_index: int, **kwargs: int
+    ) -> Tuple[int, int]:
+        """
+        Parameters
+        ----------
+        mosaic_tile_index: int
+            The tile to get the position of.
+
+        Returns
+        -------
+        position: Tuple[int, int]
+            The tile's top-left pixel within the stitched well, as (top, left).
+        """
+        return self.get_mosaic_tile_positions(**kwargs)[mosaic_tile_index]
+
+    def get_mosaic_tile_positions(self, **kwargs: int) -> List[Tuple[int, int]]:
+        """
+        The top-left pixel of every tile in the current scene, in ``M`` order,
+        at the current resolution level.
+
+        Returns
+        -------
+        positions: List[Tuple[int, int]]
+            Each tile's (top, left).
+
+        Raises
+        ------
+        exceptions.UnexpectedShapeError
+            The scene has no mosaic tile dimension.
+        ValueError
+            The manifest carries no stage positions to place the tiles from.
+        """
+        if not self._mosaic:
+            raise exceptions.UnexpectedShapeError(
+                "Cannot compute tile positions for an image without tiles."
+            )
+
+        well, sites = self._current()
+        if len(sites) == 1:
+            return [(0, 0)]
+
+        stage = [
+            self._acquisition.positions.get((well, site), (None, None))
+            for site in sites
+        ]
+        pixel_y = self._acquisition.jdce.pixel_size_y
+        pixel_x = self._acquisition.jdce.pixel_size_x
+
+        if not all(x is not None and y is not None for x, y in stage) or not (
+            pixel_x and pixel_y
+        ):
+            raise ValueError(
+                f"Scene '{self.current_scene}' has {len(sites)} tiles but no stage "
+                "positions or pixel size to place them from."
+            )
+
+        positions = [(float(x), float(y)) for x, y in stage]  # type: ignore[arg-type]
+        scale = self._level_scale()
+        step_y, step_x = pixel_y * scale, pixel_x * scale
+        origin_x = min(x for x, _ in positions)
+        origin_y = min(y for _, y in positions)
+
+        return [
+            (int(round((y - origin_y) / step_y)), int(round((x - origin_x) / step_x)))
+            for x, y in positions
+        ]
+
+    def _get_stitched_dask_mosaic(self) -> xr.DataArray:
+        return self._stitch(self.xarray_dask_data)
+
+    def _get_stitched_mosaic(self) -> xr.DataArray:
+        return self._stitch(self.xarray_data)
+
+    def _stitch(self, tiles: xr.DataArray) -> xr.DataArray:
+        """Stitch into one TCZYX array, resolving overlap last tile wins."""
+        positions = self.get_mosaic_tile_positions()
+        tile_y, tile_x = tiles.shape[-2:]
+        height = max(top for top, _ in positions) + tile_y
+        width = max(left for _, left in positions) + tile_x
+
+        data = tiles.data
+        shape = data.shape[1:-2] + (height, width)
+        stitched = (
+            da.zeros(shape, dtype=data.dtype, chunks=data.chunksize[1:])
+            if isinstance(data, da.Array)
+            else np.zeros(shape, dtype=data.dtype)
+        )
+
+        for tile, (top, left) in enumerate(positions):
+            stitched[..., top : top + tile_y, left : left + tile_x] = data[tile]
+
+        return xr.DataArray(
+            stitched,
+            dims=DEFAULT_DIMENSION_ORDER_LIST,
+            coords={
+                name: value
+                for name, value in tiles.coords.items()
+                if name != DimensionNames.MosaicTile
+            },
+            attrs=tiles.attrs,
+        )
 
     # Internals
 
