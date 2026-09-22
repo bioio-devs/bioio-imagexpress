@@ -221,11 +221,11 @@ def read_manifest(contents: str) -> List[ManifestRow]:
 
         rows.append(
             ManifestRow(
-                well=str(well),
-                site=int(site),  # type: ignore[arg-type]
-                channel=int(channel),  # type: ignore[arg-type]
-                t=int(t),  # type: ignore[arg-type]
-                z=int(z),  # type: ignore[arg-type]
+                well=well,  # type: ignore[arg-type]
+                site=site,  # type: ignore[arg-type]
+                channel=channel,  # type: ignore[arg-type]
+                t=t,  # type: ignore[arg-type]
+                z=z,  # type: ignore[arg-type]
                 subfolder=_as_relpath(record.get("ImageSubFolderPath") or ""),
                 filename=_as_relpath(filename),
                 timestamp_s=_as_float(record.get("TimeStampSec")),
