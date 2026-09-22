@@ -49,8 +49,6 @@ class Reader(BaseReader):
 
     NAME = "bioio-imagexpress"
 
-    # Required Methods
-
     def __init__(
         self,
         image: Any,
@@ -116,10 +114,10 @@ class Reader(BaseReader):
         return self._scenes
 
     def _read_delayed(self) -> xr.DataArray:
-        return self._build(delayed_read=True)
+        return self._build_xarray(delayed_read=True)
 
     def _read_immediate(self) -> xr.DataArray:
-        return self._build(delayed_read=False)
+        return self._build_xarray(delayed_read=False)
 
     def _read_indexed(self, given_dims: str, dim_specs: List[DimSpec]) -> np.ndarray:
         """
@@ -145,7 +143,7 @@ class Reader(BaseReader):
 
         return self.dask_data[tuple(dim_specs)].compute()
 
-    def _build(self, delayed_read: bool) -> xr.DataArray:
+    def _build_xarray(self, delayed_read: bool) -> xr.DataArray:
         well, sites = self._current()
         timepoints, channels, zs = self._acquisition.extents(self._current_keys())
         level = self._level()
@@ -174,8 +172,6 @@ class Reader(BaseReader):
             attrs={constants.METADATA_UNPROCESSED: self._unprocessed_metadata()},
         )
 
-    # Resolution levels
-
     @property
     def resolution_levels(self) -> Tuple[int, ...]:
         """
@@ -185,8 +181,6 @@ class Reader(BaseReader):
             The levels of the pyramid MetaXpress writes into each plane.
         """
         return tuple(range(len(self._level_shapes)))
-
-    # Metadata
 
     @property
     def physical_pixel_sizes(self) -> PhysicalPixelSizes:
@@ -316,8 +310,6 @@ class Reader(BaseReader):
 
         return metadata
 
-    # Internals
-
     def _current(self) -> Tuple[str, Tuple[int, ...]]:
         return self._scene_table[self._current_scene_index]
 
@@ -336,7 +328,8 @@ class Reader(BaseReader):
         if self._plane_metadata is None:
             self._plane_metadata = self._read_plane_metadata()
 
-        return self._plane_metadata[0]
+        shapes, _, _ = self._plane_metadata
+        return shapes
 
     @property
     def _plane_dtype(self) -> np.dtype:
@@ -344,7 +337,8 @@ class Reader(BaseReader):
         if self._plane_metadata is None:
             self._plane_metadata = self._read_plane_metadata()
 
-        return self._plane_metadata[1]
+        _, dtype, _ = self._plane_metadata
+        return dtype
 
     @property
     def _metaseries(self) -> Optional[Dict[str, Any]]:
@@ -352,7 +346,8 @@ class Reader(BaseReader):
         if self._plane_metadata is None:
             self._plane_metadata = self._read_plane_metadata()
 
-        return self._plane_metadata[2]
+        _, _, metaseries = self._plane_metadata
+        return metaseries
 
     def _read_plane_metadata(
         self,
