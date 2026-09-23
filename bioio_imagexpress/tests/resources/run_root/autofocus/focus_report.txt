@@ -1,1 +1,3 @@
-Trimmed fixture; see scripts/
+version https://git-lfs.github.com/spec/v1
+oid sha256:3872933258900c177f0d9119b7af98a4169d5dfde09fea10db83391cf77014f0
+size 30
