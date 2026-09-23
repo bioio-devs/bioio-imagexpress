@@ -1,0 +1,152 @@
+{
+    "Version": "1.1",
+    "ImageStack": {
+        "Uuid": "3faea7d3-b9ca-49db-a652-f4d32457cd6f",
+        "Application": {
+            "Name": "MetaXpress Acquire",
+            "SoftwareLabel": "2026.1.0.5526"
+        },
+        "Creation": {
+            "Date": "2026-08-04",
+            "Time": "10:31:10",
+            "TimeZoneOffset": "0"
+        },
+        "ImageFormat": "TIFF",
+        "LargeImage": false,
+        "PlateId": "3500009044",
+        "AutoLeadAcquisitionProtocol": {
+            "Camera": {
+                "Size": {
+                    "Width": 2304,
+                    "Height": 2304
+                },
+                "Binning": "1 X 1"
+            },
+            "ObjectiveCalibration": {
+                "Unit": "µm",
+                "ObjectiveName": "10X Plan Apo Lambda D",
+                "PixelWidth": 0.5817,
+                "PixelHeight": 0.5817
+            },
+            "Plate": {
+                "Name": "CellVis 96 Well Plate",
+                "Rows": 8,
+                "Columns": 12,
+                "TopLeftWellCenterOffset": {
+                    "Unit": "mm",
+                    "Horizontal": 14.3,
+                    "Vertical": 11.36
+                },
+                "WellParameters": {
+                    "Shape": "round",
+                    "Width": 6.21,
+                    "Height": 6.21,
+                    "Size": 38.564099999999996,
+                    "Unit": "mm"
+                },
+                "WellSpacing": {
+                    "Unit": "mm",
+                    "Horizontal": 9.0,
+                    "Vertical": 9.0
+                }
+            },
+            "Wavelengths": [
+                {
+                    "Index": 0,
+                    "ImagingMode": "3-D",
+                    "ZSlice": 11,
+                    "ZStep": 3.0,
+                    "EmissionFilter": {
+                        "Name": "TL",
+                        "Wavelength": 450,
+                        "Unit": "nm"
+                    },
+                    "ExcitationFilter": {
+                        "Name": "TL",
+                        "Wavelength": 450,
+                        "Unit": "nm"
+                    }
+                },
+                {
+                    "Index": 1,
+                    "ImagingMode": "3-D",
+                    "ZSlice": 11,
+                    "ZStep": 3.0,
+                    "EmissionFilter": {
+                        "Name": "FITC",
+                        "Wavelength": 520,
+                        "Unit": "nm"
+                    },
+                    "ExcitationFilter": {
+                        "Name": "FITC",
+                        "Wavelength": 520,
+                        "Unit": "nm"
+                    }
+                }
+            ],
+            "PlateMap": {
+                "ZDimensionParameters": {
+                    "Enabled": true,
+                    "Step": 3.0,
+                    "NumberOfSlices": 11,
+                    "Variable": false
+                },
+                "TimeSchedule": {
+                    "Enabled": true,
+                    "NumberOfTimepoints": 9,
+                    "Times": [
+                        {
+                            "Ms": 0
+                        },
+                        {
+                            "Ms": 1
+                        },
+                        {
+                            "Ms": 2
+                        },
+                        {
+                            "Ms": 3
+                        },
+                        {
+                            "Ms": 4
+                        },
+                        {
+                            "Ms": 5
+                        },
+                        {
+                            "Ms": 6
+                        },
+                        {
+                            "Ms": 7
+                        },
+                        {
+                            "Ms": 8
+                        }
+                    ],
+                    "Variable": false
+                }
+            },
+            "ProjectInformation": {
+                "Project": {
+                    "Name": "Wellscan_96well_TL_488"
+                },
+                "User": {
+                    "Name": "moldev"
+                }
+            },
+            "CollectionComplete": true
+        },
+        "Operator": {
+            "Login": "moldev"
+        },
+        "SpecimenHolder": {
+            "Type": "plate",
+            "Label": "CellVis 96 Well Plate",
+            "Barcode": "3500009044",
+            "Description": "ProtocolName: Wellscan_96well_TL_488, ProtocolDesc: 96 10 Well scan"
+        },
+        "ImageMetadataFiles": [
+            "image_metadata_1.csv"
+        ]
+    }
+}
