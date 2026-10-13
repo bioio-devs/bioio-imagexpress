@@ -28,6 +28,14 @@ class ReaderMetadata(bioio_base.reader_metadata.ReaderMetadata):
         return [".jdce"]
 
     @staticmethod
+    def supports_directory_images() -> bool:
+        """
+        An acquisition directory denotes the image, so ``bioio`` should also probe
+        this reader on directories that have no matching extension.
+        """
+        return True
+
+    @staticmethod
     def get_reader() -> bioio_base.reader.Reader:
         """
         Return the reader this plugin represents
