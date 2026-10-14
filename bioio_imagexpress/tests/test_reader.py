@@ -1,6 +1,6 @@
 import pathlib
 import shutil
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 import fsspec
 import numpy as np
@@ -9,7 +9,7 @@ from bioio import BioImage
 from bioio_base import dimensions, exceptions, test_utilities
 
 from bioio_imagexpress import Reader
-from bioio_imagexpress.acquisition import parse_jdce, read_manifest
+from bioio_imagexpress.acquisition import parse_jdce
 
 from .conftest import LOCAL_RESOURCES_DIR
 
@@ -118,6 +118,7 @@ def test_bioimage_reads_remote_acquisition(
     assert isinstance(img.reader, Reader)
     assert img.shape == (2, 2, 3, 64, 64)
 
+
 ###############################################################################
 
 
@@ -129,6 +130,7 @@ def test_parse_jdce_tolerates_bad_values() -> None:
     )
     assert metadata.acquired_at is None
     assert metadata.pixel_size_x is None
+
 
 @pytest.mark.parametrize(
     "filename, contents",
