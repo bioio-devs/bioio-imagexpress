@@ -151,9 +151,7 @@ def test_s3_https_url_is_read_as_anonymous_s3(
         uri: Any, enforce_exists: bool, fs_kwargs: Dict[str, Any]
     ) -> Any:
         calls.append((uri, fs_kwargs))
-        return pathlike_to_fs(
-            "memory://experiment_z_stack", enforce_exists, {}
-        )
+        return pathlike_to_fs("memory://experiment_z_stack", enforce_exists, {})
 
     monkeypatch.setattr(io, "pathlike_to_fs", fake_pathlike_to_fs)
     monkeypatch.setattr(reader, "pathlike_to_fs", fake_pathlike_to_fs)
