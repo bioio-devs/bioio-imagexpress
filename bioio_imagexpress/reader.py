@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from itertools import product
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import dask.array as da
 import numpy as np
@@ -21,6 +22,33 @@ from .acquisition import SceneKey
 ###############################################################################
 
 log = logging.getLogger(__name__)
+
+###############################################################################
+
+
+def _to_listable_url(
+    image: Any, fs_kwargs: Dict[str, Any]
+) -> Tuple[Any, Dict[str, Any]]:
+    image, fs_kwargs = io.s3_https_to_s3(image, fs_kwargs)
+    url = urlparse(str(image)) if isinstance(image, str) else None
+
+    # A descriptor can be read directly, a directory can't be found without listing
+    if (
+        url
+        and url.scheme in ("http", "https")
+        and not url.path.lower().endswith(acquisition.JDCE_EXTENSION)
+    ):
+        raise exceptions.UnsupportedFileFormatError(
+            "Reader",
+            image,
+            msg_extra=(
+                "A directory can't be listed over HTTP(S). Use an S3 URL, or the URL "
+                "of the '.jdce' descriptor itself."
+            ),
+        )
+
+    return image, fs_kwargs
+
 
 ###############################################################################
 
@@ -55,6 +83,8 @@ class Reader(BaseReader):
         fs_kwargs: Dict[str, Any] = {},
         **kwargs: Any,
     ):
+        image, fs_kwargs = _to_listable_url(image, fs_kwargs)
+
         self._fs, self._path = io.pathlike_to_fs(
             image, enforce_exists=True, fs_kwargs=fs_kwargs
         )
@@ -93,6 +123,13 @@ class Reader(BaseReader):
         ] = None
 
         self._scenes: Optional[Tuple[str, ...]] = None
+
+    @classmethod
+    def is_supported_image(
+        cls, image: Any, fs_kwargs: Dict[str, Any] = {}, **kwargs: Any
+    ) -> bool:
+        image, fs_kwargs = _to_listable_url(image, fs_kwargs)
+        return super().is_supported_image(image, fs_kwargs, **kwargs)
 
     @staticmethod
     def _is_supported_image(fs: AbstractFileSystem, path: str, **kwargs: Any) -> bool:
